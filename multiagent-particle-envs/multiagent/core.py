@@ -96,7 +96,8 @@ class World(object):
         self.damping = 0.25
         # contact response parameters
         self.contact_force = 1e+2
-        self.contact_margin = 1e-3
+
+        self.steps = 0
 
     # return all entities in the world
     @property
@@ -129,6 +130,7 @@ class World(object):
         # update agent state
         for agent in self.agents:
             self.update_agent_state(agent)
+        self.steps += 1
 
     # gather agent action forces
     def apply_action_force(self, p_force):

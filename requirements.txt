@@ -1,2 +1,6 @@
-gym
+gym==0.10.5
 numpy-stl
+torch
+matplotlib
+tqdm
+pyglet==1.5.27
