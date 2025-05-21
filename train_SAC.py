@@ -162,7 +162,7 @@ class MASAC:
         self.mask = self.mask[None, :]
 
     def select_action(self, obs_all, noise_scale=0.1):
-        actions_env = []
+        env_actions = []
         actions = []
         for i in range(self.n_agents):
             obs = torch.tensor(obs_all[i:i + 1].astype(np.float32), device=self.device)
@@ -173,11 +173,10 @@ class MASAC:
             # The first two are (x, y) \in [-1, 1]
             # The rest are say_0~say_9 \in [0, 1]
             noise = np.random.normal(size=action.shape) * noise_scale
-            action = np.clip(action + noise, -1, 1)
-            action[2:] = 0.5 * (action[2:] + 1)
-            actions_env.append([action[:2], action[2:]])
+            action = np.clip((action+1)*0.5 + noise, -1, 1)
+            env_actions.append([action[:4], action[4:]])
             actions.append(action)
-        return actions_env, np.array(actions)
+        return env_actions, np.array(actions)
 
     def train(self):
         if self.buffer.size < BATCH_SIZE:
@@ -241,7 +240,8 @@ class MASAC:
                 z = dist.rsample()
                 sample_actions = torch.tanh(z)
                 log_p = (dist.log_prob(z) - torch.log(1 - sample_actions.pow(2) + 1e-6)).sum(-1, keepdim=True)
-                sample_actions = sample_actions + self.mask * (1 - sample_actions)
+
+                sample_actions = 0.5 * (sample_actions + 1)
                 if i != j:
                     sample_actions = sample_actions.detach()
                     log_p = log_p.detach()
@@ -301,8 +301,8 @@ def main():
         done = False
         step = 0
         while not done:
-            actions_env, actions = agent.select_action(obs)
-            next_obs, rewards, dones, info = env.step(actions_env)
+            env_actions, actions = agent.select_action(obs)
+            next_obs, rewards, dones, info = env.step(env_actions)
             total_reward += rewards
             next_obs = np.array(next_obs)
             rewards = 1 + np.clip(np.array(rewards), -10, 0) / 10
