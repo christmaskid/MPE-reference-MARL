@@ -16,7 +16,8 @@ os.environ['SUPPRESS_MA_PROMPT']='1'
 # ==== Hyperparameters ====
 LR_ACTOR = 1e-4
 LR_CRITIC = 1e-4
-GAMMA = 0.0
+LR_ALPHA = 1e-5
+GAMMA = 0.9
 TAU = 0.01
 BATCH_SIZE = 1024
 BUFFER_SIZE = int(1e6)
@@ -44,6 +45,15 @@ class Actor(nn.Module):
         x = self.fc(x)
         return self.h1(x), torch.clamp(self.h2(x), -20, 2).exp()
 
+class CommDecoder(nn.Module):
+    def __init__(self, comm_dim, hid_dim, obs_dim):
+        super().__init__()
+        self.fc = nn.Sequential(
+                nn.Linear(comm_dim, hid_dim), nn.SiLU(),
+                nn.Linear(hid_dim, hid_dim), nn.SiLU(),
+                nn.Linear(hid_dim, obs_dim)) 
+    def forward(self, comm):
+        return self.fc(comm)
 
 # ==== Critic ====
 class Critic(nn.Module):
@@ -67,9 +77,9 @@ class Critics(nn.Module):
         self.Q1 = Critic(obs_dim, hid_dim, act_dim)
         self.Q2 = Critic(obs_dim, hid_dim, act_dim)
 
-    # s, a (B, n_agents, obs, act)
+    # s(n_agents, B, obs), a(n_agents, B, act)
     def forward(self, s, a, idx):
-        B = s.shape[0]
+        B = s.shape[1]
         # index 0 is the one it critics
         if idx != 0:
             s_c = s.clone()
@@ -78,8 +88,11 @@ class Critics(nn.Module):
             a_c[[0, idx]] = a[[idx, 0]]
             s=s_c
             a=a_c
-        s = s.reshape(B, self.obs_dim)
-        a = a.reshape(B, self.act_dim)
+        # (B, n_agents * obs) <- (n_agents, B, obs)
+        s = s.transpose(0, 1).reshape(B, self.obs_dim)
+        # (B, n_agents * act) <- (n_agents, B, act)
+        a = a.transpose(0, 1).reshape(B, self.act_dim)
+        # (B, n_agents*(obs+act)) <- (B, n_agents*obs), (B, n_agents*act)
         x = torch.cat((s,a), -1)
         return self.Q1(x), self.Q2(x)
 
@@ -120,25 +133,30 @@ class ReplayBuffer:
 
 # ==== MASAC Agent ====
 class MASAC:
-    def __init__(self, obs_dims, act_dims, n_agents, device):
+    def __init__(self, obs_dim, act_dim, comm_dim, n_agents, device):
         self.n_agents = n_agents
         self.device = device
 
-        self.obs_dims = obs_dims
-        self.act_dims = act_dims
-        self.buffer = ReplayBuffer(cap=BUFFER_SIZE, n_agents=n_agents, obs_dim=self.obs_dims, act_dim=self.act_dims)
+        self.obs_dim = obs_dim
+        self.act_dim = act_dim
+        self.comm_dim = comm_dim
+        self.buffer = ReplayBuffer(cap=BUFFER_SIZE, n_agents=n_agents, obs_dim=self.obs_dim, act_dim=self.act_dim)
 
-        self.actor = Actor(obs_dim=obs_dims,
+        self.actor = Actor(obs_dim=obs_dim,
                              hid_dim=512,
-                             act_dim=act_dims).to(device)
+                             act_dim=act_dim).to(device)
 
-        self.critic = Critics(obs_dim=obs_dims * n_agents,
+        self.decoder = CommDecoder(comm_dim=comm_dim,
+                hid_dim=512,
+                obs_dim=obs_dim).to(device)
+
+        self.critic = Critics(obs_dim=obs_dim * n_agents,
                                 hid_dim=512,
-                                act_dim=act_dims * n_agents).to(device)
+                                act_dim=act_dim * n_agents).to(device)
 
-        self.target_critic = Critics(obs_dim=obs_dims * n_agents,
+        self.target_critic = Critics(obs_dim=obs_dim * n_agents,
                                        hid_dim=512,
-                                       act_dim=act_dims * n_agents).to(device)
+                                       act_dim=act_dim * n_agents).to(device)
 
         # for i, (actor, critic) in enumerate(zip(self.actors, self.critics)):
         #     actor_path = os.path.join('models', f"agent_{i}_actor.pth")
@@ -149,17 +167,14 @@ class MASAC:
         self.target_critic.load_state_dict(self.critic.state_dict())
 
         self.actor_optim = optim.Adam(self.actor.parameters(), lr=LR_ACTOR)
+        self.decoder_optim = optim.Adam(self.decoder.parameters(), lr=LR_ACTOR)
         self.critic_optim = optim.Adam(self.critic.parameters(), lr=LR_CRITIC)
 
         self.alpha = 0.01
         self.log_alpha = torch.tensor(np.log(self.alpha), dtype=torch.float32, requires_grad=True, device=self.device)
-        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=1e-5)
+        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=LR_ALPHA)
         self.clip_norm = 1
 
-        self.mask = torch.ones(12, device=self.device) * 0.5
-        self.mask[0] = 0
-        self.mask[1] = 0
-        self.mask = self.mask[None, :]
 
     def select_action(self, obs_all, noise_scale=0.1):
         env_actions = []
@@ -186,10 +201,11 @@ class MASAC:
 
         dones = torch.tensor(dones.astype(np.float32), device=self.device)
 
-        obs_all = torch.tensor(obs, device=self.device)
-        actions_all = torch.tensor(actions, device=self.device)
-        rewards_all = torch.tensor(rewards, device=self.device)
-        next_obs_all = torch.tensor(next_obs, device=self.device)
+        # (n_agents, B, obs) <- ...
+        obs_all = torch.tensor(obs.swapaxes(0,1), device=self.device)
+        actions_all = torch.tensor(actions.swapaxes(0,1), device=self.device)
+        rewards_all = torch.tensor(rewards.swapaxes(0,1), device=self.device)
+        next_obs_all = torch.tensor(next_obs.swapaxes(0,1), device=self.device)
 
         total_actor_loss = 0
         total_critic_loss = 0
@@ -198,7 +214,7 @@ class MASAC:
         next_log_p_all = []
 
         for i in range(self.n_agents):
-            next_obs_i = next_obs_all[:, i]
+            next_obs_i = next_obs_all[i]
             with torch.no_grad():
                 mu, sigma = self.actor(next_obs_i)
                 dist = Normal(mu, sigma)
@@ -207,18 +223,20 @@ class MASAC:
                 next_log_p = (dist.log_prob(z) - torch.log(1 - next_actions.pow(2) + 1e-6)).sum(-1, keepdim=True)
                 next_actions_all.append(next_actions)
                 next_log_p_all.append(next_log_p)
-        next_actions_all = torch.cat(next_actions_all, dim=1)
-        next_log_p_all = torch.cat(next_log_p_all, dim=1)
+
+        # (n_agents, B, act)
+        next_actions_all = torch.stack(next_actions_all, dim=0)
+        next_log_p_all = torch.stack(next_log_p_all, dim=0)
 
         for i in range(self.n_agents):
-            next_obs_i = next_obs_all[:, i]
-            rewards_i = rewards_all[:, i]
+            next_obs_i = next_obs_all[i]
+            rewards_i = rewards_all[i]
 
 
             with torch.no_grad():
                 q1, q2 = self.target_critic(next_obs_all, next_actions_all, i)
                 next_q = torch.min(q1, q2)
-                next_q = next_q - self.alpha * next_log_p_all[:, i:i+1]
+                next_q = next_q - self.alpha * next_log_p_all[i:i+1]
                 target_q = rewards_i + GAMMA * next_q * (1 - dones)
 
             pred_q1, pred_q2 = self.critic(obs_all, actions_all, i)
@@ -235,7 +253,7 @@ class MASAC:
 
             sample_actions_all = []
             for j in range(self.n_agents):
-                mu, sigma = self.actor(obs_all[:,j])
+                mu, sigma = self.actor(obs_all[j])
                 dist = Normal(mu, sigma)
                 z = dist.rsample()
                 sample_actions = torch.tanh(z)
@@ -248,18 +266,26 @@ class MASAC:
                 else:
                     log_p_i = log_p
                 sample_actions_all.append(sample_actions)
-            sample_actions_all = torch.cat(sample_actions_all, dim=1)
+            sample_actions_all = torch.stack(sample_actions_all, dim=0)
             q1, q2 = self.critic(obs_all, sample_actions_all, i)
             q = torch.min(q1, q2)
             loss_pi = (self.alpha * log_p_i - q).mean()
             self.actor_optim.zero_grad()
+            self.decoder_optim.zero_grad()
             loss_pi.backward()
             nn.utils.clip_grad_norm_(self.actor.parameters(), self.clip_norm)
-            self.actor_optim.step()
             total_actor_loss += loss_pi.item()
 
+            pred_obs = self.decoder(sample_actions_all[i].detach()[:, -self.comm_dim:])
+            err = (pred_obs - obs_all[i])**2
+            loss_decoder = err.shape[0]/((1/err).mean())
+            loss_decoder.backward()
+            self.actor_optim.step()
+            self.decoder_optim.step()
+
+
             self.alpha_optim.zero_grad()
-            loss_alpha = self.log_alpha * (-log_p_i.mean().item() + self.act_dims)
+            loss_alpha = self.log_alpha * (-log_p_i.mean().item() + self.act_dim)
             loss_alpha.backward()
             self.alpha_optim.step()
             self.alpha = np.exp(self.log_alpha.item())
@@ -285,7 +311,7 @@ def main():
     env.reset()
     obs_dims = env.observation_space[0].shape[0]
     act_dims = sum([sp.shape[0] for sp in env.action_space[0].spaces])
-    agent = MASAC(obs_dims, act_dims, N_AGENTS, device)
+    agent = MASAC(obs_dims, act_dims, 10, N_AGENTS, device)
     ep_actor_losses = []
     ep_critic_losses = []
 
@@ -306,8 +332,6 @@ def main():
             total_reward += rewards
             next_obs = np.array(next_obs)
             rewards = 1 + np.clip(np.array(rewards), -10, 0) / 10
-            dones = np.array(dones)
-            done = dones.all()
             if step > STEPS_PER_EPISODE:
                 done = True
             agent.buffer.add(obs, next_obs, actions, rewards, done)
@@ -316,7 +340,6 @@ def main():
             critic_losses.append(critic_loss)
             obs = next_obs
             step += 1
-
         returns.append(-np.sum(total_reward))
         ep_actor_losses.append(np.mean(actor_losses))
         ep_critic_losses.append(np.mean(critic_losses))
