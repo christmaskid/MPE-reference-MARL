@@ -10,8 +10,8 @@ from make_env import make_env
 from train_maddpg import MADDPG
 import imageio
 
-ENV_NAME = 'simple_reference' #"multiple_reference" # # "simple_reference_no_pos" 
-N_AGENTS = 2 #3 #2
+ENV_NAME = "multiple_reference" # # "simple_reference_no_pos" 'simple_reference' #
+N_AGENTS = 3 #2 # 2 #
 STEPS_PER_EPISODE = 100
 SAVE_DIR = f"maddpg_{ENV_NAME}_{N_AGENTS}" #'models/'
 
@@ -37,6 +37,9 @@ def main():
     for step in range(STEPS_PER_EPISODE):
         env_actions, actions = multi_agent.select_action(obs)
         next_obs, rewards, dones, info = env.step(env_actions)
+
+        broadcast_agent = env.world.agents[env.world.steps % len(env.agents)]
+        print(f"Step {step}, agent {broadcast_agent.id} broadcasts: {broadcast_agent.state.c}", flush=True)
         
         total_reward += rewards
         actions = np.array(actions)

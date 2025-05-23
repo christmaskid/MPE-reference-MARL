@@ -80,6 +80,9 @@ class BaseReferenceScenario(BaseScenario):
         dist2 = np.sum(np.square(agent.goal_a.state.p_pos - agent.goal_b.state.p_pos))
         return -dist2
 
+    def get_broadcast_agent(self, world):
+        # Get the agent that is broadcasting at the current step
+        return world.agents[world.steps % self.n_agents]
 
     def observation(self, agent, world):
         raise NotImplementedError("This method should be implemented in the derived class.")

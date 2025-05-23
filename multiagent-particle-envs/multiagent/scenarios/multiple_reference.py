@@ -13,8 +13,8 @@ class Scenario(BaseReferenceScenario):
 
         # who am I speaking to? where should they go?
         speakto_id = agent.goal_a.id if agent.goal_a is not None else -1
-        speakto_pos = agent.goal_b.state.p_pos
-        speakto_target_pos = agent.goal_a.state.p_pos if agent.goal_a is not None else (0, 0)
+        speakto_pos = agent.goal_a.state.p_pos if agent.goal_a is not None else (0, 0)
+        speakto_target_pos = agent.goal_b.state.p_pos
         speakto_distance = speakto_target_pos - speakto_pos
 
         # get relative positions of all entities in this agent's reference frame

@@ -15,7 +15,7 @@ sys.path.insert(0,'multiagent-particle-envs')
 from make_env import make_env
 
 # ==== Hyperparameters ====
-ENV_NAME = "multiple_reference" #"simple_reference" #"simple_reference_no_pos" #
+ENV_NAME = "multiple_reference_no_pos" #"multiple_reference" #"simple_reference" #"simple_reference_no_pos" #
 N_AGENTS = 3 #2 #2 #
 LR_ACTOR = 3e-4
 LR_CRITIC = 3e-4
