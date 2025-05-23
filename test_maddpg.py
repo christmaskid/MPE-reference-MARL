@@ -10,10 +10,10 @@ from make_env import make_env
 from train_maddpg import MADDPG
 import imageio
 
-ENV_NAME = 'simple_reference'
-N_AGENTS = 2
-STEPS_PER_EPISODE = 40
-SAVE_DIR = 'models/'
+ENV_NAME = 'simple_reference' #"multiple_reference" # # "simple_reference_no_pos" 
+N_AGENTS = 2 #3 #2
+STEPS_PER_EPISODE = 100
+SAVE_DIR = f"maddpg_{ENV_NAME}_{N_AGENTS}" #'models/'
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

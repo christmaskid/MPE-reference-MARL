@@ -4,13 +4,12 @@ from multiagent.scenario import BaseScenario
 import colorsys
 
 class BaseReferenceScenario(BaseScenario):
-    def __init__(self, n_agents=2, n_landmarks=2):
+    def __init__(self):
         super().__init__()
-        self.n_agents = n_agents
-        self.n_landmarks = n_landmarks
 
-    def make_world(self, n_agents=2, n_landmarks=2):
-        self.n_agents = self.n_agents
+    def make_world(self, n_agents=2, n_landmarks=None):
+        self.n_agents = n_agents
+        self.n_landmarks = n_landmarks if n_landmarks is not None else self.n_agents
 
         world = World()
         # set any world properties first

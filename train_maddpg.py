@@ -15,8 +15,8 @@ sys.path.insert(0,'multiagent-particle-envs')
 from make_env import make_env
 
 # ==== Hyperparameters ====
-ENV_NAME = "simple_reference"
-N_AGENTS = 2
+ENV_NAME = "multiple_reference" #"simple_reference" #"simple_reference_no_pos" #
+N_AGENTS = 3 #2 #2 #
 LR_ACTOR = 3e-4
 LR_CRITIC = 3e-4
 GAMMA = 0.95
@@ -229,9 +229,12 @@ class MADDPG:
 
 # ==== Training Loop ====
 def main():
+    print("Training MADDPG for {} agents in {} environment...".format(N_AGENTS, ENV_NAME), flush=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env = make_env(ENV_NAME, n_agents=N_AGENTS)
     env.reset()
+    save_dir = 'maddpg_{}_{}'.format(ENV_NAME, N_AGENTS)
+    os.makedirs(save_dir, exist_ok=True)
 
     obs_dims = env.observation_space[0].shape[0]
     act_dims = sum([sp.shape[0] for sp in env.action_space[0].spaces])
@@ -282,10 +285,10 @@ def main():
                   f"critic loss {np.mean(critic_losses):.4f}", flush=True)
 
         if episode % 10 == 0:  # adjust frequency
-            draw_result(returns, ep_actor_losses, ep_critic_losses)
-            multi_agent.save_models(save_dir='models/')
+            draw_result(returns, ep_actor_losses, ep_critic_losses, save_dir=save_dir)
+            multi_agent.save_models(save_dir=save_dir)
 
-def draw_result(returns, actor_losses, critic_losses):
+def draw_result(returns, actor_losses, critic_losses, save_dir='checkpoints'):
     episodes = range(1, len(returns) + 1)
 
     plt.figure(figsize=(15, 4))
@@ -325,7 +328,7 @@ def draw_result(returns, actor_losses, critic_losses):
     plt.grid(True)
 
     plt.tight_layout()
-    plt.savefig("training_curves_ddpg_{}_{}.png".format(ENV_NAME, N_AGENTS))  # or plt.show() if you prefer
+    plt.savefig(os.path.join(save_dir, "training_curves_ddpg_{}_{}.png".format(ENV_NAME, N_AGENTS)))  # or plt.show() if you prefer
     plt.close()
 
 if __name__ == '__main__':
