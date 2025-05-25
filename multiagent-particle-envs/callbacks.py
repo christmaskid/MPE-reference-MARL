@@ -1,5 +1,6 @@
 import numpy as np
 
+# TODO, not done
 # define done_callback: done if agent collides with its goal
 def done_callback(agent, world):
     # agent.goal_b is the target landmark for agent[agent.goal_a]

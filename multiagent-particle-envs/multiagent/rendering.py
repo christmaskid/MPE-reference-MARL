@@ -136,6 +136,25 @@ class Viewer(object):
         self.add_onetime(geom)
         return geom
 
+    def draw_text(self, text, pos, color=(0, 0, 0, 255), font_size=16):
+        """Draw text at the given position (in world coordinates)."""
+        import pyglet
+        # Transform world coordinates to screen coordinates
+        x = (pos[0] - self.transform.translation[0] / self.transform.scale[0]) * self.transform.scale[0]
+        y = (pos[1] - self.transform.translation[1] / self.transform.scale[1]) * self.transform.scale[1]
+        label = pyglet.text.Label(
+            text,
+            font_name='Arial',
+            font_size=font_size,
+            color=color,  # RGBA
+            x=x,
+            y=y,
+            anchor_x='center',
+            anchor_y='bottom',
+            batch=None
+        )
+        label.draw()
+
     def get_array(self):
         self.window.flip()
         image_data = pyglet.image.get_buffer_manager().get_color_buffer().get_image_data()

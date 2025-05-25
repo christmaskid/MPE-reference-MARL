@@ -6,6 +6,11 @@ import colorsys
 class BaseReferenceScenario(BaseScenario):
     def __init__(self):
         super().__init__()
+        self.use_landmark_pos = False
+        self.use_agent_id = True
+        self.reward_alpha = 1 # the weight of learning communication vs. movement 
+        self.norm_direction = False
+        self.landmark_movable = False
 
     def make_world(self, n_agents=2, n_landmarks=None):
         self.n_agents = n_agents
@@ -15,26 +20,35 @@ class BaseReferenceScenario(BaseScenario):
         # set any world properties first
         world.dim_c = 10
         world.collaborative = True  # whether agents share rewards
+
         # add agents
         world.agents = [Agent() for i in range(self.n_agents)]
         for i, agent in enumerate(world.agents):
             agent.name = 'agent %d' % i
             agent.collide = False
+        
         # add landmarks
         world.landmarks = [Landmark() for i in range(self.n_agents)]
         for i, landmark in enumerate(world.landmarks):
             landmark.name = 'landmark %d' % i
             landmark.collide = False
-            landmark.movable = False
+            landmark.movable = self.landmark_movable or False
+            landmark.id = i
+        
         # make initial conditions
+        self.custom_init(world)
         self.reset_world(world)
         return world
+    
+    def custom_init(self, world):
+        pass
 
     def reset_world(self, world):
         # assign goals to agents
         for agent in world.agents:
             agent.goal_a = None
             agent.goal_b = None
+            agent.self_goal = None
         # want other agent to go to the goal landmark
 
         # random permutation of agents and landmarks
@@ -53,6 +67,9 @@ class BaseReferenceScenario(BaseScenario):
             agent.id = i
             agent.goal_a = world.agents[target_agents[i]]
             agent.goal_b = world.landmarks[i]
+
+            # assign the goal landmark to the agent that is supposed to go there
+            agent.goal_a.self_goal = agent.goal_b
         
         # random properties for landmarks
         for i, landmark in enumerate(world.landmarks):
@@ -78,12 +95,58 @@ class BaseReferenceScenario(BaseScenario):
         if agent.goal_a is None or agent.goal_b is None:
             return 0.0
         dist2 = np.sum(np.square(agent.goal_a.state.p_pos - agent.goal_b.state.p_pos))
-        return -dist2
+        dist_self = np.sum(np.square(agent.state.p_pos - agent.self_goal.state.p_pos))
+
+        # print(f"Reward for agent {agent.id}: ", end="")
+        # print(f"agent.goal_a: {agent.goal_a.state.p_pos}, agent.goal_b: {agent.goal_b.state.p_pos}")
+        # print(f"agent.state.p_pos: {agent.state.p_pos}, agent.self_goal: {agent.self_goal.state.p_pos}")
+        # print(f"dist2: {dist2}, dist_self: {dist_self}")
+
+        return -dist2 * self.reward_alpha - dist_self * (1 - self.reward_alpha)
 
     def get_broadcast_agent(self, world):
         # Get the agent that is broadcasting at the current step
         return world.agents[world.steps % self.n_agents]
 
     def observation(self, agent, world):
-        raise NotImplementedError("This method should be implemented in the derived class.")
-            
+        # where am I going?
+        direction = np.array(agent.state.p_vel)
+        if self.norm_direction:
+            direction = direction / np.linalg.norm(direction) if np.linalg.norm(direction) > 0 else direction
+
+        # who am I speaking to? where should they go?
+        speakto_id = agent.goal_a.id if agent.goal_a is not None else -1
+        speakto_pos = agent.goal_a.state.p_pos if agent.goal_a is not None else (0, 0)
+        speakto_target_pos = agent.goal_b.state.p_pos
+        speakto_distance = speakto_target_pos - speakto_pos
+
+        # get relative positions of all entities in this agent's reference frame
+        entity_pos = []
+        if self.use_landmark_pos:
+            for entity in world.landmarks:
+                dist = entity.state.p_pos - agent.state.p_pos
+                if self.norm_direction:
+                    dist = dist / np.linalg.norm(dist) if np.linalg.norm(dist) > 0 else dist
+                entity_pos.append(dist)
+                
+        # the agent that is broadcasting at current step
+        comm = world.agents[world.steps % self.n_agents].state.c
+        
+        if self.use_agent_id:
+            return np.concatenate([
+                [agent.id],
+                direction,
+                [speakto_id],
+                speakto_distance,
+                *entity_pos,
+                comm
+            ])
+        else:
+            return np.concatenate([
+                # [agent.id],
+                direction,
+                # [speakto_id],
+                speakto_distance,
+                *entity_pos,
+                comm
+            ])

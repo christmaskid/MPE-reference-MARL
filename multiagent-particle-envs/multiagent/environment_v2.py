@@ -2,7 +2,8 @@ import gym
 from gym import spaces
 from gym.envs.registration import EnvSpec
 import numpy as np
-from multiagent.multi_discrete import MultiDiscrete
+
+# 
 
 # environment for all agents in the multiagent world
 # currently code assumes that no agents will be created/destroyed at runtime!
@@ -40,27 +41,18 @@ class MultiAgentEnv(gym.Env):
         self.observation_space = []
         for agent in self.agents:
             total_action_space = []
-            # physical action space
-            if self.discrete_action_space:
-                u_action_space = spaces.Discrete(world.dim_p * 2 + 1)
-            else:
-                u_action_space = spaces.Box(low=0, high=1.0, shape=(world.dim_p * 2,), dtype=np.float32)
+            # physical action space # MODIFIED HERE
+            u_action_space = spaces.Box(low=0, high=1.0, shape=(world.dim_p,), dtype=np.float32)
             if agent.movable:
                 total_action_space.append(u_action_space)
             # communication action space
-            if self.discrete_action_space:
-                c_action_space = spaces.Discrete(world.dim_c)
-            else:
-                c_action_space = spaces.Box(low=0.0, high=1.0, shape=(world.dim_c,), dtype=np.float32)
+            c_action_space = spaces.Box(low=0.0, high=1.0, shape=(world.dim_c,), dtype=np.float32)
             if not agent.silent:
                 total_action_space.append(c_action_space)
             
             # total action space
             # all action spaces are discrete, so simplify to MultiDiscrete action space
-            if all([isinstance(act_space, spaces.Discrete) for act_space in total_action_space]):
-                act_space = MultiDiscrete([[0, act_space.n - 1] for act_space in total_action_space])
-            else:
-                act_space = spaces.Tuple(total_action_space)
+            act_space = spaces.Tuple(total_action_space)
             self.action_space.append(act_space)
 
             # observation space
@@ -144,35 +136,11 @@ class MultiAgentEnv(gym.Env):
         agent.action.u = np.zeros(self.world.dim_p)
         agent.action.c = np.zeros(self.world.dim_c)
         # process action
-        if isinstance(action_space, MultiDiscrete):
-            act = []
-            size = action_space.high - action_space.low + 1
-            index = 0
-            for s in size:
-                act.append(action[index:(index+s)])
-                index += s
-            action = act
 
         if agent.movable:
-            # physical action
-            if self.discrete_action_input:
-                agent.action.u = np.zeros(self.world.dim_p)
-                # process discrete action
-                if action[0] == 1: agent.action.u[0] = -1.0
-                if action[0] == 2: agent.action.u[0] = +1.0
-                if action[0] == 3: agent.action.u[1] = -1.0
-                if action[0] == 4: agent.action.u[1] = +1.0
-            else:
-                if self.force_discrete_action:
-                    d = np.argmax(action[0])
-                    action[0][:] = 0.0
-                    action[0][d] = 1.0
-                if self.discrete_action_space:
-                    agent.action.u[0] += action[0][1] - action[0][2]
-                    agent.action.u[1] += action[0][3] - action[0][4]
-                else:
-                    agent.action.u[0] = action[0][0]-action[0][1]
-                    agent.action.u[1] = action[0][2]-action[0][3]
+            # physical action # MODIFIED HERE
+            agent.action.u[0] = action[0][0]
+            agent.action.u[1] = action[0][1]
             sensitivity = 5.0
             if agent.accel is not None:
                 sensitivity = agent.accel

@@ -15,21 +15,24 @@ sys.path.insert(0,'multiagent-particle-envs')
 from make_env import make_env
 
 # ==== Hyperparameters ====
-ENV_NAME = "multiple_reference_no_pos" #"multiple_reference" #"simple_reference" #"simple_reference_no_pos" #
-N_AGENTS = 3 #2 #2 #
-LR_ACTOR = 3e-4
-LR_CRITIC = 3e-4
-GAMMA = 0.95
+ENV_NAME = "speaking" #"simple_reference_alpha" #"simple_reference_no_pos" #"multiple_reference_no_pos" #"multiple_reference" #
+N_AGENTS = 2 #3 #2 #
+HIDDEN_DIM = 32
+LR_ACTOR = 1e-3 #3e-4
+LR_CRITIC = 1e-3 #3e-4
+GAMMA = 0.9 #5
 TAU = 0.005
-BATCH_SIZE = 1024
+BATCH_SIZE = 256
+WARMUP_SIZE = 1024
 BUFFER_SIZE = int(1e6)
 EPISODES = 30000
-STEPS_PER_EPISODE = 10
-CLIP_NORM = 0.5
+STEPS_PER_EPISODE = 100 #00
+CLIP_NORM = 1
+NOISE_SCALE = 0.2
 
 # ==== Actor ====
 class Actor(nn.Module):
-    def __init__(self, obs_dim, act_dim, hidden_dim=256):
+    def __init__(self, obs_dim, act_dim, hidden_dim=HIDDEN_DIM):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(obs_dim, hidden_dim), nn.ReLU(),
@@ -42,7 +45,7 @@ class Actor(nn.Module):
 
 # ==== Critic ====
 class Critic(nn.Module):
-    def __init__(self, total_obs_dim, total_act_dim, hidden_dim=256):
+    def __init__(self, total_obs_dim, total_act_dim, hidden_dim=HIDDEN_DIM):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(total_obs_dim + total_act_dim, hidden_dim), nn.ReLU(),
@@ -139,7 +142,7 @@ class MADDPG:
             for i in range(self.n_agents)
         }
 
-    def select_action(self, obs_all, noise_scale=0.1):
+    def select_action(self, obs_all, noise_scale=NOISE_SCALE):
         env_actions = [] # for env to step (u, c)
         actions = []
         for i in range(self.n_agents):
@@ -150,7 +153,12 @@ class MADDPG:
             action = (action + 1) / 2.0 
 
             u, c = action[:self.act_u_dim], action[self.act_u_dim:]
-            env_actions.append([u, c])
+            action_list = []
+            if len(u)>0:
+                action_list.append(u)
+            if len(c)>0:
+                action_list.append(c)
+            env_actions.append(action_list)
             
             actions.append(action)
         
@@ -161,8 +169,8 @@ class MADDPG:
             self.buffer[i].add(obs[i], next_obs[i], actions[i], rewards[i], dones[i])
 
     def train(self):
-        if len(self.buffer[0]) < BATCH_SIZE:
-            return 0.0, 0.0
+        if len(self.buffer[0]) < WARMUP_SIZE:
+            return 0.0, 0.0, 0.0
 
         obs, next_obs, actions, rewards, dones = [], [], [], [], []
         for i in range(self.n_agents):
@@ -187,6 +195,7 @@ class MADDPG:
 
         total_actor_loss = 0
         total_critic_loss = 0
+        total_q_value = 0
 
         with torch.no_grad():
             next_actions = [self.agents[i].target_actor(next_obs[i]) for i in range(self.n_agents)] # [(B, act_dim)] * n_agents
@@ -213,10 +222,11 @@ class MADDPG:
 
             total_actor_loss += actor_loss.item()
             total_critic_loss += critic_loss.item()
+            total_q_value += y.mean().item()
 
             self.agents[i].update_targets()
 
-        return total_actor_loss / self.n_agents, total_critic_loss / self.n_agents
+        return total_actor_loss / self.n_agents, total_critic_loss / self.n_agents, total_q_value / self.n_agents
 
     def save_models(self, save_dir='checkpoints'):
         os.makedirs(save_dir, exist_ok=True)
@@ -230,6 +240,23 @@ class MADDPG:
 # ==== Training Loop ====
 def main():
     print("Training MADDPG for {} agents in {} environment...".format(N_AGENTS, ENV_NAME), flush=True)
+    print("========================================", flush=True)
+    print("Hyperparameters: ", flush=True) 
+    print("- LR_ACTOR: ", LR_ACTOR, flush=True)
+    print("- LR_CRITIC: ", LR_CRITIC, flush=True)
+    print("- GAMMA: ", GAMMA, flush=True)
+    print("- TAU: ", TAU, flush=True)
+    print("- BATCH_SIZE: ", BATCH_SIZE, flush=True)
+    print("- BUFFER_SIZE: ", BUFFER_SIZE, flush=True)
+    print("- EPISODES: ", EPISODES, flush=True)
+    print("- STEPS_PER_EPISODE: ", STEPS_PER_EPISODE, flush=True)
+    print("- CLIP_NORM: ", CLIP_NORM, flush=True)
+    print("- NOISE_SCALE: ", NOISE_SCALE, flush=True)
+    print("- WARMUP_SIZE: ", WARMUP_SIZE, flush=True)
+    print("- HIDDEN_DIM: ", HIDDEN_DIM, flush=True)
+    print("========================================", flush=True)
+
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env = make_env(ENV_NAME, n_agents=N_AGENTS)
     env.reset()
@@ -238,57 +265,71 @@ def main():
 
     obs_dims = env.observation_space[0].shape[0]
     act_dims = sum([sp.shape[0] for sp in env.action_space[0].spaces])
-    act_u_dim = 4
+    act_u_dim = 0 if ENV_NAME == 'speaking' else 2  # 'speaking' has no u action
     print("obs_dims:", obs_dims, "act_dims:", act_dims, flush=True)
 
     multi_agent = MADDPG(obs_dims, act_dims, act_u_dim, N_AGENTS, device)
     ep_actor_losses = []
     ep_critic_losses = []
-
     returns = []
+    return_dict = {i: [] for i in range(N_AGENTS)}
+    ep_q_values = []
 
     for episode in tqdm(range(EPISODES)):
         obs = env.reset()
         obs = np.array(obs)
         actor_losses = []
         critic_losses = []
+        q_values = []
+
         total_reward = np.zeros((N_AGENTS,))
         done = False
+        prev_rewards = None  # Initialize previous rewards to a large value
 
         for step in range(STEPS_PER_EPISODE):
             env_actions, actions = multi_agent.select_action(obs)
             next_obs, rewards, dones, info = env.step(env_actions)
             
+            # print(rewards, flush=True)
+            # input()
             total_reward += rewards
             actions = np.array(actions)
             next_obs = np.array(next_obs)
-            # rewards = 1 + np.clip(np.array(rewards), -10, 0) / 10
             rewards = np.array(rewards)
+            # rewards = 1 + np.clip(np.array(rewards), -10, 0) / 10
+            incremental_rewards = np.array(rewards) - np.array(prev_rewards) if prev_rewards is not None else np.zeros_like(rewards)
+            prev_rewards = rewards
             dones = np.array(dones)
 
-            multi_agent.add(obs, next_obs, actions, rewards, dones)
-            actor_loss, critic_loss = multi_agent.train()
+            # multi_agent.add(obs, next_obs, actions, rewards, dones)
+            multi_agent.add(obs, next_obs, actions, incremental_rewards, dones)
+            actor_loss, critic_loss, q_value = multi_agent.train()
             actor_losses.append(actor_loss)
             critic_losses.append(critic_loss)
+            q_values.append(q_value)
             obs = next_obs
 
             if dones.all():
                 break
 
         returns.append(total_reward.mean())
+        for i in range(N_AGENTS):
+            return_dict[i].append(total_reward[i])
         ep_actor_losses.append(np.mean(actor_losses))
         ep_critic_losses.append(np.mean(critic_losses))
+        ep_q_values.append(np.mean(q_values))
 
         if episode % 1 == 0:
             print(f"Episode {episode}: return {returns[-1]:.2f}, ",
                   f"actor loss {np.mean(actor_losses):.4f}, ",
-                  f"critic loss {np.mean(critic_losses):.4f}", flush=True)
+                  f"critic loss {np.mean(critic_losses):.4f}", 
+                  f"q value {np.mean(q_values):.4f}", flush=True)
 
         if episode % 10 == 0:  # adjust frequency
-            draw_result(returns, ep_actor_losses, ep_critic_losses, save_dir=save_dir)
+            draw_result(returns, return_dict, ep_actor_losses, ep_critic_losses, ep_q_values, save_dir=save_dir, print_single=env.world.collaborative)
             multi_agent.save_models(save_dir=save_dir)
 
-def draw_result(returns, actor_losses, critic_losses, save_dir='checkpoints'):
+def draw_result(returns, return_dict,actor_losses, critic_losses, q_values, save_dir='checkpoints', print_single=False):
     episodes = range(1, len(returns) + 1)
 
     plt.figure(figsize=(15, 4))
@@ -298,9 +339,15 @@ def draw_result(returns, actor_losses, critic_losses, save_dir='checkpoints'):
         return [np.mean(data[i-min(i, interval):i]) for i in range(len(data))]
     
     # Reward
-    plt.subplot(1, 3, 1)
-    plt.plot(episodes, returns, label='Average Return')
-    plt.plot(episodes, smooth(returns, smooth_interval), label='Smoothed Return', color='red')
+    plt.subplot(1, 4, 1)
+    if print_single:
+        plt.plot(episodes, returns, label='Average Return')
+        plt.plot(episodes, smooth(returns, smooth_interval), label='Smoothed Return', color='red')
+    else:
+        for i in range(N_AGENTS):
+            plt.plot(episodes, return_dict[i], label='Agent {}'.format(i), alpha=0.5)
+        for i in range(N_AGENTS):
+            plt.plot(episodes, smooth(return_dict[i], smooth_interval), label='Agent {} smoothed'.format(i))
     plt.legend()
     plt.xlabel("Episode")
     plt.ylabel("Return")
@@ -308,7 +355,7 @@ def draw_result(returns, actor_losses, critic_losses, save_dir='checkpoints'):
     plt.grid(True)
 
     # Actor loss
-    plt.subplot(1, 3, 2)
+    plt.subplot(1, 4, 2)
     plt.plot(episodes, actor_losses, label='Actor Loss', color='orange')
     # plt.plot(episodes, smooth(actor_losses, smooth_interval), label='Smoothed Return', color='red')
     plt.legend()
@@ -318,13 +365,22 @@ def draw_result(returns, actor_losses, critic_losses, save_dir='checkpoints'):
     plt.grid(True)
 
     # Critic loss
-    plt.subplot(1, 3, 3)
+    plt.subplot(1, 4, 3)
     plt.plot(episodes, critic_losses, label='Critic Loss', color='green')
     # plt.plot(episodes, smooth(critic_losses, smooth_interval), label='Smoothed Return', color='red')
     plt.legend()
     plt.xlabel("Episode")
     plt.ylabel("Loss")
     plt.title("Critic Loss")
+    plt.grid(True)
+
+    # Q value
+    plt.subplot(1, 4, 4)
+    plt.plot(episodes, q_values, label='Q Value', color='purple')
+    plt.legend()
+    plt.xlabel("Episode")
+    plt.ylabel("Q Value")
+    plt.title("Q Value")
     plt.grid(True)
 
     plt.tight_layout()
