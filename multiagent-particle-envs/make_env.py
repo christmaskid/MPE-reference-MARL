@@ -29,13 +29,14 @@ def make_env(scenario_name, benchmark=False, *args, **kwargs):
         .action_space       :   Returns the action space for each agent
         .n                  :   Returns the number of Agents
     '''
-    from multiagent.environment import MultiAgentEnv
+    from multiagent.environment_conti import MultiAgentEnv
     import multiagent.scenarios as scenarios
 
     # load scenario from script
     scenario = scenarios.load(scenario_name + ".py").Scenario()
     # create world
     world = scenario.make_world(*args, **kwargs)
+
     # create multiagent environment
     if benchmark:        
         env = MultiAgentEnv(world, scenario.reset_world, scenario.reward, scenario.observation, scenario.benchmark_data)

@@ -2,7 +2,8 @@ import gym
 from gym import spaces
 from gym.envs.registration import EnvSpec
 import numpy as np
-from multiagent.multi_discrete import MultiDiscrete
+
+# 
 
 # environment for all agents in the multiagent world
 # currently code assumes that no agents will be created/destroyed at runtime!
@@ -26,13 +27,9 @@ class MultiAgentEnv(gym.Env):
         self.info_callback = info_callback
         self.done_callback = done_callback
         # environment parameters
-        self.discrete_action_space = False
-        # if true, action is a number 0...N, otherwise action is a one-hot N-dimensional vector
-        self.discrete_action_input = False
-        # if true, even the action is continuous, action will be performed discretely
-        self.force_discrete_action = world.discrete_action if hasattr(world, 'discrete_action') else False
         # if true, every agent has the same reward
-        self.shared_reward = world.collaborative if hasattr(world, 'collaborative') else False
+        # self.shared_reward = world.collaborative if hasattr(world, 'collaborative') else False
+        self.shared_reward = world.shared_reward
         self.time = 0
 
         # configure spaces
@@ -40,27 +37,17 @@ class MultiAgentEnv(gym.Env):
         self.observation_space = []
         for agent in self.agents:
             total_action_space = []
-            # physical action space
-            if self.discrete_action_space:
-                u_action_space = spaces.Discrete(world.dim_p * 2 + 1)
-            else:
-                u_action_space = spaces.Box(low=0, high=1.0, shape=(world.dim_p * 2,), dtype=np.float32)
+            # physical action space # MODIFIED HERE
+            u_action_space = spaces.Box(low=-1.0, high=1.0, shape=(world.dim_p,), dtype=np.float32)
             if agent.movable:
                 total_action_space.append(u_action_space)
             # communication action space
-            if self.discrete_action_space:
-                c_action_space = spaces.Discrete(world.dim_c)
-            else:
-                c_action_space = spaces.Box(low=0.0, high=1.0, shape=(world.dim_c,), dtype=np.float32)
+            c_action_space = spaces.Box(low=-1.0, high=1.0, shape=(world.dim_c,), dtype=np.float32)
             if not agent.silent:
                 total_action_space.append(c_action_space)
             
             # total action space
-            # all action spaces are discrete, so simplify to MultiDiscrete action space
-            if all([isinstance(act_space, spaces.Discrete) for act_space in total_action_space]):
-                act_space = MultiDiscrete([[0, act_space.n - 1] for act_space in total_action_space])
-            else:
-                act_space = spaces.Tuple(total_action_space)
+            act_space = spaces.Tuple(total_action_space)
             self.action_space.append(act_space)
 
             # observation space
@@ -94,11 +81,12 @@ class MultiAgentEnv(gym.Env):
             done_n.append(self._get_done(agent))
 
             info_n['n'].append(self._get_info(agent))
-        # all agents get total reward in cooperative case
-        reward = np.sum(reward_n)
-        # if self.shared_reward:
-        #     reward_n = [reward] * self.n
 
+        # all agents get total reward in cooperative case
+        reward = np.sum(reward_n) # MODIFIED HERE
+        for i in range(len(reward_n)):
+            reward_n[i] = (1-self.shared_reward) * reward_n[i] + self.shared_reward * reward / len(reward_n)
+        
         return obs_n, reward_n, done_n, info_n
 
     def reset(self):
@@ -143,35 +131,11 @@ class MultiAgentEnv(gym.Env):
         agent.action.u = np.zeros(self.world.dim_p)
         agent.action.c = np.zeros(self.world.dim_c)
         # process action
-        if isinstance(action_space, MultiDiscrete):
-            act = []
-            size = action_space.high - action_space.low + 1
-            index = 0
-            for s in size:
-                act.append(action[index:(index+s)])
-                index += s
-            action = act
 
         if agent.movable:
-            # physical action
-            if self.discrete_action_input:
-                agent.action.u = np.zeros(self.world.dim_p)
-                # process discrete action
-                if action[0] == 1: agent.action.u[0] = -1.0
-                if action[0] == 2: agent.action.u[0] = +1.0
-                if action[0] == 3: agent.action.u[1] = -1.0
-                if action[0] == 4: agent.action.u[1] = +1.0
-            else:
-                if self.force_discrete_action:
-                    d = np.argmax(action[0])
-                    action[0][:] = 0.0
-                    action[0][d] = 1.0
-                if self.discrete_action_space:
-                    agent.action.u[0] += action[0][1] - action[0][2]
-                    agent.action.u[1] += action[0][3] - action[0][4]
-                else:
-                    agent.action.u[0] = action[0][0]-action[0][1]
-                    agent.action.u[1] = action[0][2]-action[0][3]
+            # physical action # MODIFIED HERE
+            agent.action.u[0] = action[0][0]
+            agent.action.u[1] = action[0][1]
             sensitivity = 5.0
             if agent.accel is not None:
                 sensitivity = agent.accel
@@ -179,11 +143,7 @@ class MultiAgentEnv(gym.Env):
             action = action[1:]
         if not agent.silent:
             # communication action
-            if self.discrete_action_input:
-                agent.action.c = np.zeros(self.world.dim_c)
-                agent.action.c[action[0]] = 1.0
-            else:
-                agent.action.c = action[0]
+            agent.action.c = action[0]
             action = action[1:]
         # make sure we used all elements of action
         assert len(action) == 0
@@ -195,37 +155,85 @@ class MultiAgentEnv(gym.Env):
 
     # render environment
     def render(self, mode='human'):
-        # Use pygame-based rendering
-        from multiagent import rendering
-        if not hasattr(self, 'pyg_viewer') or self.pyg_viewer is None:
-            self.pyg_viewer = rendering.PygameViewer(width=700, height=700)
-        # Dynamically set bounds based on all entities
-        all_pos = [entity.state.p_pos for entity in self.world.entities]
-        all_pos = np.array(all_pos)
-        min_x, min_y = np.min(all_pos, axis=0) - 0.2
-        max_x, max_y = np.max(all_pos, axis=0) + 0.2
-        self.pyg_viewer.set_bounds(min_x, max_x, min_y, max_y)
-        # Prepare agent texts
-        agent_texts = []
-        for idx, agent in enumerate(self.agents):
-            text = f"agent {idx} says: {agent.action.c}" if hasattr(agent, 'action') and hasattr(agent.action, 'c') else f"agent {idx}"
-            agent_texts.append(text)
-        # Render
-        return self.pyg_viewer.render(self.world.entities, agent_texts=agent_texts, return_rgb_array=(mode=='rgb_array'))
+        if mode == 'human':
+            alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+            message = ''
+            for agent in self.world.agents:
+                comm = []
+                for other in self.world.agents:
+                    if other is agent: continue
+                    if np.all(other.state.c == 0):
+                        word = '_'
+                    else:
+                        word = alphabet[np.argmax(other.state.c)]
+                    message += (other.name + ' to ' + agent.name + ': ' + word + '   ')
+            print(message)
 
-    def enable_render(self, mode="human"):
-        if not hasattr(self, 'pyg_viewer') or self.pyg_viewer is None:
+        for i in range(len(self.viewers)):
+            # create viewers (if necessary)
+            if self.viewers[i] is None:
+                # import rendering only if we need it (and don't import for headless machines)
+                #from gym.envs.classic_control import rendering
+                from multiagent import rendering
+                self.viewers[i] = rendering.Viewer(700,700)
+
+        # create rendering geometry
+        if self.render_geoms is None:
+            # import rendering only if we need it (and don't import for headless machines)
+            #from gym.envs.classic_control import rendering
             from multiagent import rendering
-            self.pyg_viewer = rendering.PygameViewer(width=700, height=700)
+            self.render_geoms = []
+            self.render_geoms_xform = []
+            for entity in self.world.entities:
+                geom = rendering.make_circle(entity.size)
+                xform = rendering.Transform()
+                if 'agent' in entity.name:
+                    geom.set_color(*entity.color, alpha=0.5)
+                else:
+                    geom.set_color(*entity.color)
+                geom.add_attr(xform)
+                self.render_geoms.append(geom)
+                self.render_geoms_xform.append(xform)
 
-    def draw(self):
-        # Not needed, handled in render
-        pass
+            # add geoms to viewer
+            for viewer in self.viewers:
+                viewer.geoms = []
+                for geom in self.render_geoms:
+                    viewer.add_geom(geom)
 
-    def close(self):
-        if hasattr(self, 'pyg_viewer') and self.pyg_viewer is not None:
-            self.pyg_viewer.close()
-            self.pyg_viewer = None
+        results = []
+        for i in range(len(self.viewers)):
+            from multiagent import rendering
+            # update bounds to center around agent
+            cam_range = 1
+            if self.shared_viewer:
+                pos = np.zeros(self.world.dim_p)
+            else:
+                pos = self.agents[i].state.p_pos
+            self.viewers[i].set_bounds(pos[0]-cam_range,pos[0]+cam_range,pos[1]-cam_range,pos[1]+cam_range)
+            # update geometry positions
+            for e, entity in enumerate(self.world.entities):
+                self.render_geoms_xform[e].set_translation(*entity.state.p_pos)
+            # --- Collect agent speech texts ---
+            agent_texts = []
+            for idx, agent in enumerate(self.agents):
+                text = f"agent {idx} says: {agent.action.c}"
+                agent_texts.append(text)
+            # Draw all agent texts at the bottom of the image BEFORE rendering (so they appear in the frame)
+            if hasattr(self.viewers[i], 'draw_text'):
+                for j, text in enumerate(agent_texts):
+                    # Place each text line at the bottom, stacking them
+                    pos_x = self.viewers[i].width // 2
+                    margin = 5
+                    font_size = 16
+                    pos_y = margin + j * (font_size + 2)
+                    self.viewers[i].draw_text(text, (pos_x, pos_y), font_size=font_size)
+            else:
+                raise NotImplementedError("Viewer does not support text rendering.")
+            # render to display or array
+            results.append(self.viewers[i].render(return_rgb_array = mode=='rgb_array'))
+
+        return results
 
     # create receptor field locations in local coordinate frame
     def _make_receptor_locations(self, agent):

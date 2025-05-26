@@ -1,0 +1,9 @@
+*__pycache__*
+*.pyc
+*fail*
+*.gif
+*.log
+# *.png
+# *.jpg
+*.pth
+# *maddpg_*/*

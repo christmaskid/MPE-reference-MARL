@@ -4,3 +4,4 @@ torch
 matplotlib
 tqdm
 pyglet==1.5.27
+prng
