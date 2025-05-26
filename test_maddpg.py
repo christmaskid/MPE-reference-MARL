@@ -15,14 +15,15 @@ N_AGENTS = 3
 DIM_C = 10
 SHARED_REWARD = 1
 act_u_dim = 2
+REWARD_ALPHA = 1 # the weight of learning communication vs. movement
 
+SAVE_DIR = f"maddpg_{ENV_NAME}_{N_AGENTS}_{DIM_C}_{SHARED_REWARD}_{REWARD_ALPHA}_{act_u_dim}" #'models/'
 STEPS_PER_EPISODE = 150
-SAVE_DIR = f"maddpg_{ENV_NAME}_{N_AGENTS}_{DIM_C}_{SHARED_REWARD}_{act_u_dim}" #'models/'
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env = make_env(ENV_NAME, n_agents=N_AGENTS, n_landmarks=N_AGENTS,
-                   shared_reward=SHARED_REWARD, dim_c=DIM_C)
+                   shared_reward=SHARED_REWARD, dim_c=DIM_C, reward_alpha=REWARD_ALPHA)
     env.reset()
 
     print("Testing environment: ", ENV_NAME)

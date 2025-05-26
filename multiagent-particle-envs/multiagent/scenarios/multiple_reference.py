@@ -7,7 +7,6 @@ class Scenario(BaseReferenceScenario):
     def __init__(self):
         super().__init__()
         self.norm_direction = False  # normalize direction vectors
-        self.reward_alpha = 1
         self.reward_shaping = False
         
     def reward(self, agent, world):
@@ -15,14 +14,6 @@ class Scenario(BaseReferenceScenario):
             return 0.0
         dist2 = np.sum(np.square(agent.goal_a.state.p_pos - agent.goal_b.state.p_pos))
         dist_self = np.sum(np.square(agent.state.p_pos - agent.self_goal.state.p_pos))
-
-        # if self.reward_shaping:
-        #     SCALE = 4
-        #     for landmark in world.landmarks:
-        #         if landmark.id != agent.goal_b.id:
-        #             dist2 -= np.sum(np.square(agent.goal_a.state.p_pos - landmark.state.p_pos)) / SCALE
-        #         if landmark.id != agent.self_goal.id:
-        #             dist_self -= np.sum(np.square(agent.state.p_pos - landmark.state.p_pos)) / SCALE
 
         return -dist2 * self.reward_alpha - dist_self * (1 - self.reward_alpha)
     
@@ -36,10 +27,13 @@ class Scenario(BaseReferenceScenario):
                 
         # communication of the other agent
         comm = agent.listen_to.state.c
+        # comm = world.agents[world.steps % self.n_agents].state.c if world.steps % self.n_agents < len(world.agents) else np.zeros(self.dim_c)
     
         return np.concatenate([
+            # [agent.id],
             self_pos,
             self_vel,
+            # [agent.goal_a.id],
             speakto_dst,
             comm
         ])

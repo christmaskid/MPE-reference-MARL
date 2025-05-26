@@ -19,18 +19,19 @@ N_AGENTS = 3
 DIM_C = 10
 SHARED_REWARD = 1
 act_u_dim = 2
+REWARD_ALPHA = 1 # the weight of learning communication vs. movement
 
-SAVE_DIR = f"maddpg_{ENV_NAME}_{N_AGENTS}_{DIM_C}_{SHARED_REWARD}_{act_u_dim}" #'models/'
+SAVE_DIR = f"maddpg_{ENV_NAME}_{N_AGENTS}_{DIM_C}_{SHARED_REWARD}_{REWARD_ALPHA}_{act_u_dim}" #'models/'
 
 # ==== Hyperparameters ====
 HIDDEN_DIM = 128 #32
-LR_ACTOR = 3e-4 # 1e-3 #
-LR_CRITIC = 3e-4 # 1e-3 #
+LR_ACTOR = 1e-4 # 1e-3 #
+LR_CRITIC = 1e-4 # 1e-3 #
 GAMMA = 0.95
 TAU = 0.005
 BATCH_SIZE = 256
 WARMUP_SIZE = 1024
-BUFFER_SIZE = int(1e6)
+BUFFER_SIZE = int(1e5)
 EPISODES = 30000
 STEPS_PER_EPISODE = 100 #00
 CLIP_NORM = 1
@@ -44,6 +45,7 @@ class Actor(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(obs_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, act_dim), nn.Tanh()
         )
 
@@ -56,6 +58,7 @@ class Critic(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(total_obs_dim + total_act_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, 1)
         )
@@ -249,6 +252,8 @@ def main():
     print("Training MADDPG for {} agents in {} environment...".format(N_AGENTS, ENV_NAME), flush=True)
     print("DIM_C: ", DIM_C, flush=True)
     print("SHARED_REWARD: ", SHARED_REWARD, flush=True)
+    print("REWARD_ALPHA", REWARD_ALPHA, flush=True)
+    print("act_u_dim: ", act_u_dim, flush=True)
     print("========================================", flush=True)
     print("Hyperparameters: ", flush=True) 
     print("- LR_ACTOR: ", LR_ACTOR, flush=True)
@@ -268,7 +273,7 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env = make_env(ENV_NAME, n_agents=N_AGENTS, n_landmarks=N_AGENTS,
-                   shared_reward=SHARED_REWARD, dim_c=DIM_C)
+                   shared_reward=SHARED_REWARD, dim_c=DIM_C, reward_alpha=REWARD_ALPHA)
     env.seed(0)
     np.random.seed(0)
     torch.manual_seed(0)
@@ -307,7 +312,6 @@ def main():
             actions = np.array(actions)
             next_obs = np.array(next_obs)
             rewards = np.array(rewards)
-            # rewards = 1 + np.clip(np.array(rewards), -10, 0) / 10
             incremental_rewards = np.array(rewards) - np.array(prev_rewards) if prev_rewards is not None else np.zeros_like(rewards)
             prev_rewards = rewards
             dones = np.array(dones)
@@ -339,7 +343,7 @@ def main():
                   f"q value {np.mean(q_values):.4f}", flush=True)
 
         if episode % 10 == 0:  # adjust frequency
-            draw_result(returns, return_dict, ep_actor_losses, ep_critic_losses, ep_q_values, save_dir=SAVE_DIR, print_single=(SHARED_REWARD==0))
+            draw_result(returns, return_dict, ep_actor_losses, ep_critic_losses, ep_q_values, save_dir=SAVE_DIR, print_single=(SHARED_REWARD==1))
             multi_agent.save_models(save_dir=SAVE_DIR)
 
 def draw_result(returns, return_dict,actor_losses, critic_losses, q_values, save_dir='checkpoints', print_single=False):
