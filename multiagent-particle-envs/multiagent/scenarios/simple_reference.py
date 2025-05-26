@@ -6,7 +6,38 @@ import colorsys
 class Scenario(BaseReferenceScenario):
     def __init__(self):
         super().__init__()
-        self.n_agents = 2
-        self.n_landmarks = 2
-        self.use_landmark_pos = True
-        self.use_agent_id = False
+        self.norm_direction = False  # normalize direction vectors
+        self.reward_alpha = 0.5
+        self.reward_shaping = True
+        
+    def reward(self, agent, world):
+        if agent.goal_a is None or agent.goal_b is None:
+            return 0.0
+        dist2 = np.sum(np.square(agent.goal_a.state.p_pos - agent.goal_b.state.p_pos))
+        dist_self = np.sum(np.square(agent.state.p_pos - agent.self_goal.state.p_pos))
+
+        if self.reward_shaping:
+            SCALE = 4
+            for landmark in world.landmarks:
+                if landmark.id != agent.goal_b.id:
+                    dist2 -= np.sum(np.square(agent.goal_a.state.p_pos - landmark.state.p_pos)) / SCALE
+                if landmark.id != agent.self_goal.id:
+                    dist_self -= np.sum(np.square(agent.state.p_pos - landmark.state.p_pos)) / SCALE
+
+        return -dist2 * self.reward_alpha - dist_self * (1 - self.reward_alpha)
+    
+    def observation(self, agent, world):
+        # where am I?
+        self_pos = agent.state.p_pos
+
+        # who am I speaking to? where should they go?
+        speakto_dst = agent.goal_b.state.p_pos if agent.goal_b is not None else (0, 0)
+                
+        # communication of the other agent
+        comm = world.agents[1 - agent.id].state.c
+    
+        return np.concatenate([
+            self_pos,
+            speakto_dst,
+            comm
+        ])

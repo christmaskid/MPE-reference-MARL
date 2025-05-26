@@ -12,14 +12,15 @@ class BaseReferenceScenario(BaseScenario):
         self.norm_direction = False
         self.landmark_movable = False
 
-    def make_world(self, n_agents=2, n_landmarks=None):
+    def make_world(self, n_agents=2, n_landmarks=None, shared_reward=0.5, dim_c=10):
         self.n_agents = n_agents
         self.n_landmarks = n_landmarks if n_landmarks is not None else self.n_agents
+        self.shared_reward = shared_reward
 
         world = World()
         # set any world properties first
-        world.dim_c = 10
-        world.collaborative = True  # whether agents share rewards
+        world.dim_c = dim_c
+        world.shared_reward = shared_reward  # whether agents share rewards
 
         # add agents
         world.agents = [Agent() for i in range(self.n_agents)]
@@ -49,6 +50,7 @@ class BaseReferenceScenario(BaseScenario):
             agent.goal_a = None
             agent.goal_b = None
             agent.self_goal = None
+            agent.listen_to = None
         # want other agent to go to the goal landmark
 
         # random permutation of agents and landmarks
@@ -70,6 +72,7 @@ class BaseReferenceScenario(BaseScenario):
 
             # assign the goal landmark to the agent that is supposed to go there
             agent.goal_a.self_goal = agent.goal_b
+            agent.goal_a.listen_to = agent
         
         # random properties for landmarks
         for i, landmark in enumerate(world.landmarks):

@@ -14,13 +14,19 @@ import sys
 sys.path.insert(0,'multiagent-particle-envs')
 from make_env import make_env
 
+ENV_NAME = "multiple_reference"
+N_AGENTS = 3
+DIM_C = 10
+SHARED_REWARD = 1
+act_u_dim = 2
+
+SAVE_DIR = f"maddpg_{ENV_NAME}_{N_AGENTS}_{DIM_C}_{SHARED_REWARD}_{act_u_dim}" #'models/'
+
 # ==== Hyperparameters ====
-ENV_NAME = "speaking" #"simple_reference_alpha" #"simple_reference_no_pos" #"multiple_reference_no_pos" #"multiple_reference" #
-N_AGENTS = 2 #3 #2 #
-HIDDEN_DIM = 32
-LR_ACTOR = 1e-3 #3e-4
-LR_CRITIC = 1e-3 #3e-4
-GAMMA = 0.9 #5
+HIDDEN_DIM = 128 #32
+LR_ACTOR = 3e-4 # 1e-3 #
+LR_CRITIC = 3e-4 # 1e-3 #
+GAMMA = 0.95
 TAU = 0.005
 BATCH_SIZE = 256
 WARMUP_SIZE = 1024
@@ -28,7 +34,8 @@ BUFFER_SIZE = int(1e6)
 EPISODES = 30000
 STEPS_PER_EPISODE = 100 #00
 CLIP_NORM = 1
-NOISE_SCALE = 0.2
+NOISE_SCALE = 0.1
+
 
 # ==== Actor ====
 class Actor(nn.Module):
@@ -102,13 +109,13 @@ class Agent:
     def learn_actor(self, actor_loss):
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
-        nn.utils.clip_grad_norm_(self.actor.parameters(), CLIP_NORM)
+        # nn.utils.clip_grad_norm_(self.actor.parameters(), CLIP_NORM)
         self.actor_optimizer.step()
         
     def learn_critic(self, critic_loss):
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
-        nn.utils.clip_grad_norm_(self.critic.parameters(), CLIP_NORM)
+        # nn.utils.clip_grad_norm_(self.critic.parameters(), CLIP_NORM)
         self.critic_optimizer.step()
 
     def update_targets(self):
@@ -150,7 +157,7 @@ class MADDPG:
             action = self.agents[i].actor(obs).detach().cpu().numpy().squeeze()
             action += noise_scale * np.random.randn(*action.shape)
             action = np.tanh(action)
-            action = (action + 1) / 2.0 
+            action = (action + 0) / 1.0
 
             u, c = action[:self.act_u_dim], action[self.act_u_dim:]
             action_list = []
@@ -240,6 +247,8 @@ class MADDPG:
 # ==== Training Loop ====
 def main():
     print("Training MADDPG for {} agents in {} environment...".format(N_AGENTS, ENV_NAME), flush=True)
+    print("DIM_C: ", DIM_C, flush=True)
+    print("SHARED_REWARD: ", SHARED_REWARD, flush=True)
     print("========================================", flush=True)
     print("Hyperparameters: ", flush=True) 
     print("- LR_ACTOR: ", LR_ACTOR, flush=True)
@@ -258,14 +267,16 @@ def main():
 
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    env = make_env(ENV_NAME, n_agents=N_AGENTS)
+    env = make_env(ENV_NAME, n_agents=N_AGENTS, n_landmarks=N_AGENTS,
+                   shared_reward=SHARED_REWARD, dim_c=DIM_C)
+    env.seed(0)
+    np.random.seed(0)
+    torch.manual_seed(0)
     env.reset()
-    save_dir = 'maddpg_{}_{}'.format(ENV_NAME, N_AGENTS)
-    os.makedirs(save_dir, exist_ok=True)
+    os.makedirs(SAVE_DIR, exist_ok=True)
 
     obs_dims = env.observation_space[0].shape[0]
     act_dims = sum([sp.shape[0] for sp in env.action_space[0].spaces])
-    act_u_dim = 0 if ENV_NAME == 'speaking' else 2  # 'speaking' has no u action
     print("obs_dims:", obs_dims, "act_dims:", act_dims, flush=True)
 
     multi_agent = MADDPG(obs_dims, act_dims, act_u_dim, N_AGENTS, device)
@@ -304,10 +315,12 @@ def main():
             # multi_agent.add(obs, next_obs, actions, rewards, dones)
             multi_agent.add(obs, next_obs, actions, incremental_rewards, dones)
             actor_loss, critic_loss, q_value = multi_agent.train()
-            actor_losses.append(actor_loss)
-            critic_losses.append(critic_loss)
-            q_values.append(q_value)
             obs = next_obs
+
+            if actor_loss != 0.0 or critic_loss != 0.0:
+                actor_losses.append(actor_loss)
+                critic_losses.append(critic_loss)
+                q_values.append(q_value)
 
             if dones.all():
                 break
@@ -326,8 +339,8 @@ def main():
                   f"q value {np.mean(q_values):.4f}", flush=True)
 
         if episode % 10 == 0:  # adjust frequency
-            draw_result(returns, return_dict, ep_actor_losses, ep_critic_losses, ep_q_values, save_dir=save_dir, print_single=env.world.collaborative)
-            multi_agent.save_models(save_dir=save_dir)
+            draw_result(returns, return_dict, ep_actor_losses, ep_critic_losses, ep_q_values, save_dir=SAVE_DIR, print_single=(SHARED_REWARD==0))
+            multi_agent.save_models(save_dir=SAVE_DIR)
 
 def draw_result(returns, return_dict,actor_losses, critic_losses, q_values, save_dir='checkpoints', print_single=False):
     episodes = range(1, len(returns) + 1)

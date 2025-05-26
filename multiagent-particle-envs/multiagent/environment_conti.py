@@ -27,13 +27,9 @@ class MultiAgentEnv(gym.Env):
         self.info_callback = info_callback
         self.done_callback = done_callback
         # environment parameters
-        self.discrete_action_space = False
-        # if true, action is a number 0...N, otherwise action is a one-hot N-dimensional vector
-        self.discrete_action_input = False
-        # if true, even the action is continuous, action will be performed discretely
-        self.force_discrete_action = world.discrete_action if hasattr(world, 'discrete_action') else False
         # if true, every agent has the same reward
-        self.shared_reward = world.collaborative if hasattr(world, 'collaborative') else False
+        # self.shared_reward = world.collaborative if hasattr(world, 'collaborative') else False
+        self.shared_reward = world.shared_reward
         self.time = 0
 
         # configure spaces
@@ -42,16 +38,15 @@ class MultiAgentEnv(gym.Env):
         for agent in self.agents:
             total_action_space = []
             # physical action space # MODIFIED HERE
-            u_action_space = spaces.Box(low=0, high=1.0, shape=(world.dim_p,), dtype=np.float32)
+            u_action_space = spaces.Box(low=-1.0, high=1.0, shape=(world.dim_p,), dtype=np.float32)
             if agent.movable:
                 total_action_space.append(u_action_space)
             # communication action space
-            c_action_space = spaces.Box(low=0.0, high=1.0, shape=(world.dim_c,), dtype=np.float32)
+            c_action_space = spaces.Box(low=-1.0, high=1.0, shape=(world.dim_c,), dtype=np.float32)
             if not agent.silent:
                 total_action_space.append(c_action_space)
             
             # total action space
-            # all action spaces are discrete, so simplify to MultiDiscrete action space
             act_space = spaces.Tuple(total_action_space)
             self.action_space.append(act_space)
 
@@ -88,10 +83,10 @@ class MultiAgentEnv(gym.Env):
             info_n['n'].append(self._get_info(agent))
 
         # all agents get total reward in cooperative case
-        reward = np.sum(reward_n)
-        if self.shared_reward:
-            reward_n = [reward] * self.n
-
+        reward = np.sum(reward_n) # MODIFIED HERE
+        for i in range(len(reward_n)):
+            reward_n[i] = (1-self.shared_reward) * reward_n[i] + self.shared_reward * reward / len(reward_n)
+        
         return obs_n, reward_n, done_n, info_n
 
     def reset(self):
@@ -148,11 +143,7 @@ class MultiAgentEnv(gym.Env):
             action = action[1:]
         if not agent.silent:
             # communication action
-            if self.discrete_action_input:
-                agent.action.c = np.zeros(self.world.dim_c)
-                agent.action.c[action[0]] = 1.0
-            else:
-                agent.action.c = action[0]
+            agent.action.c = action[0]
             action = action[1:]
         # make sure we used all elements of action
         assert len(action) == 0

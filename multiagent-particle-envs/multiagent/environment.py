@@ -196,85 +196,37 @@ class MultiAgentEnv(gym.Env):
 
     # render environment
     def render(self, mode='human'):
-        if mode == 'human':
-            alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-            message = ''
-            for agent in self.world.agents:
-                comm = []
-                for other in self.world.agents:
-                    if other is agent: continue
-                    if np.all(other.state.c == 0):
-                        word = '_'
-                    else:
-                        word = alphabet[np.argmax(other.state.c)]
-                    message += (other.name + ' to ' + agent.name + ': ' + word + '   ')
-            print(message)
+        # Use pygame-based rendering
+        from multiagent import rendering
+        if not hasattr(self, 'pyg_viewer') or self.pyg_viewer is None:
+            self.pyg_viewer = rendering.PygameViewer(width=700, height=700)
+        # Dynamically set bounds based on all entities
+        all_pos = [entity.state.p_pos for entity in self.world.entities]
+        all_pos = np.array(all_pos)
+        min_x, min_y = np.min(all_pos, axis=0) - 0.2
+        max_x, max_y = np.max(all_pos, axis=0) + 0.2
+        self.pyg_viewer.set_bounds(min_x, max_x, min_y, max_y)
+        # Prepare agent texts
+        agent_texts = []
+        for idx, agent in enumerate(self.agents):
+            text = f"agent {idx} says: {agent.action.c}" if hasattr(agent, 'action') and hasattr(agent.action, 'c') else f"agent {idx}"
+            agent_texts.append(text)
+        # Render
+        return self.pyg_viewer.render(self.world.entities, agent_texts=agent_texts, return_rgb_array=(mode=='rgb_array'))
 
-        for i in range(len(self.viewers)):
-            # create viewers (if necessary)
-            if self.viewers[i] is None:
-                # import rendering only if we need it (and don't import for headless machines)
-                #from gym.envs.classic_control import rendering
-                from multiagent import rendering
-                self.viewers[i] = rendering.Viewer(700,700)
-
-        # create rendering geometry
-        if self.render_geoms is None:
-            # import rendering only if we need it (and don't import for headless machines)
-            #from gym.envs.classic_control import rendering
+    def enable_render(self, mode="human"):
+        if not hasattr(self, 'pyg_viewer') or self.pyg_viewer is None:
             from multiagent import rendering
-            self.render_geoms = []
-            self.render_geoms_xform = []
-            for entity in self.world.entities:
-                geom = rendering.make_circle(entity.size)
-                xform = rendering.Transform()
-                if 'agent' in entity.name:
-                    geom.set_color(*entity.color, alpha=0.5)
-                else:
-                    geom.set_color(*entity.color)
-                geom.add_attr(xform)
-                self.render_geoms.append(geom)
-                self.render_geoms_xform.append(xform)
+            self.pyg_viewer = rendering.PygameViewer(width=700, height=700)
 
-            # add geoms to viewer
-            for viewer in self.viewers:
-                viewer.geoms = []
-                for geom in self.render_geoms:
-                    viewer.add_geom(geom)
+    def draw(self):
+        # Not needed, handled in render
+        pass
 
-        results = []
-        for i in range(len(self.viewers)):
-            from multiagent import rendering
-            # update bounds to center around agent
-            cam_range = 1
-            if self.shared_viewer:
-                pos = np.zeros(self.world.dim_p)
-            else:
-                pos = self.agents[i].state.p_pos
-            self.viewers[i].set_bounds(pos[0]-cam_range,pos[0]+cam_range,pos[1]-cam_range,pos[1]+cam_range)
-            # update geometry positions
-            for e, entity in enumerate(self.world.entities):
-                self.render_geoms_xform[e].set_translation(*entity.state.p_pos)
-            # --- Collect agent speech texts ---
-            agent_texts = []
-            for idx, agent in enumerate(self.agents):
-                text = f"agent {idx} says: {agent.action.c}"
-                agent_texts.append(text)
-            # Draw all agent texts at the bottom of the image BEFORE rendering (so they appear in the frame)
-            if hasattr(self.viewers[i], 'draw_text'):
-                for j, text in enumerate(agent_texts):
-                    # Place each text line at the bottom, stacking them
-                    pos_x = self.viewers[i].width // 2
-                    margin = 5
-                    font_size = 16
-                    pos_y = margin + j * (font_size + 2)
-                    self.viewers[i].draw_text(text, (pos_x, pos_y), font_size=font_size)
-            else:
-                raise NotImplementedError("Viewer does not support text rendering.")
-            # render to display or array
-            results.append(self.viewers[i].render(return_rgb_array = mode=='rgb_array'))
-
-        return results
+    def close(self):
+        if hasattr(self, 'pyg_viewer') and self.pyg_viewer is not None:
+            self.pyg_viewer.close()
+            self.pyg_viewer = None
 
     # create receptor field locations in local coordinate frame
     def _make_receptor_locations(self, agent):
