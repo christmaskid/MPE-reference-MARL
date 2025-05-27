@@ -25,8 +25,8 @@ SAVE_DIR = f"maddpg_{ENV_NAME}_{N_AGENTS}_{DIM_C}_{SHARED_REWARD}_{REWARD_ALPHA}
 
 # ==== Hyperparameters ====
 HIDDEN_DIM = 512 #32
-LR_ACTOR = 1e-4
-LR_CRITIC = 1e-4
+LR_ACTOR = 1e-5
+LR_CRITIC = 1e-5
 GAMMA = 0.9
 TAU = 0.01
 BATCH_SIZE = 1024
@@ -34,7 +34,7 @@ BUFFER_SIZE = int(3e4)
 EPISODES = 100000
 STEPS_PER_EPISODE = 30
 
-WARMUP_SIZE = STEPS_PER_EPISODE * 100
+WARMUP_SIZE = STEPS_PER_EPISODE * 100 * N_AGENTS  # 100 episodes
 NOISE_SCALE = 0.1
 
 
@@ -47,9 +47,21 @@ class Actor(nn.Module):
             nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, act_dim), nn.Tanh()
         )
+        
+        self.min_action = -1.0
+        self.max_action = 1.0
+        self.action_mean = (self.min_action + self.max_action) / 2.0
+        self.action_std = (self.max_action - self.min_action) / 2.0
 
     def forward(self, obs):
         return self.net(obs)
+    
+    def sample(self, obs, noise_scale=NOISE_SCALE):
+        action = self(obs)
+        action = torch.clamp(action + noise_scale * torch.randn_like(action), self.min_action, self.max_action)
+        action = (action - self.action_mean) / self.action_std
+        return action
+
 
 # ==== Critic ====
 class Critic(nn.Module):
@@ -62,7 +74,8 @@ class Critic(nn.Module):
         )
 
     def forward(self, obs_all, act_all):
-        x = torch.cat([obs_all, act_all], dim=-1)
+        act_u_all = act_all[:, :act_u_dim*N_AGENTS]  # Only movement actions
+        x = torch.cat([obs_all, act_u_all], dim=-1)
         return self.net(x)
 
 # ==== MADDPG Agent ====
@@ -75,9 +88,9 @@ class Agent:
         self.device = device
 
         self.actor = Actor(obs_dim, act_dim).to(device)
-        self.critic = Critic(obs_dim * self.n_agents, act_dim * self.n_agents).to(device)
+        self.critic = Critic(obs_dim * self.n_agents, act_u_dim * self.n_agents).to(device)
         self.target_actor = Actor(obs_dim, act_dim).to(device)
-        self.target_critic = Critic(obs_dim * self.n_agents, act_dim * self.n_agents).to(device)
+        self.target_critic = Critic(obs_dim * self.n_agents, act_u_dim * self.n_agents).to(device)
 
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=LR_ACTOR)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=LR_CRITIC)
@@ -134,28 +147,15 @@ class MADDPG:
         self.act_dim = act_dim
         self.act_u_dim = act_u_dim
 
-        self.agents = {
-            agent_id: Agent(obs_dim, act_dim, agent_id=agent_id, 
-                                n_agents=self.n_agents, device=self.device)
-            for agent_id in range(n_agents)
-        }
-        
-        # Create a separate buffer for each agent
-        self.buffer = {
-            i: ReplayBuffer(cap=BUFFER_SIZE, obs_dim=self.obs_dim, act_dim=self.act_dim)
-            for i in range(self.n_agents)
-        }
+        self.agent = Agent(obs_dim, act_dim, agent_id=0, n_agents=self.n_agents, device=self.device)
+        self.buffer = ReplayBuffer(cap=BUFFER_SIZE, obs_dim=self.obs_dim, act_dim=self.act_dim)
 
     def select_action(self, obs_all, noise_scale=NOISE_SCALE):
         env_actions = [] # for env to step (u, c)
         actions = []
         for i in range(self.n_agents):
             obs = torch.tensor(obs_all[i], dtype=torch.float32).unsqueeze(0).to(self.device)
-            action = self.agents[i].actor(obs).detach().cpu().numpy().squeeze()
-            action += noise_scale * np.random.randn(*action.shape)
-            action = np.tanh(action)
-            action = (action + 0) / 1.0
-
+            action = self.agent.actor.sample(obs, noise_scale=noise_scale).detach().cpu().numpy().squeeze()
             u, c = action[:self.act_u_dim], action[self.act_u_dim:]
             action_list = []
             if len(u)>0:
@@ -170,22 +170,22 @@ class MADDPG:
     
     def add(self, obs, next_obs, actions, rewards, dones):
         for i in range(self.n_agents):
-            self.buffer[i].add(obs[i], next_obs[i], actions[i], rewards[i], dones[i])
+            self.buffer.add(obs[i], next_obs[i], actions[i], rewards[i], dones[i])
 
-    def train(self, env):
-        if len(self.buffer[0]) < WARMUP_SIZE:
+    def train(self):
+        if len(self.buffer) < WARMUP_SIZE:
             return 0.0, 0.0, 0.0
 
         obs, next_obs, actions, rewards, dones = [], [], [], [], []
         for i in range(self.n_agents):
-            obs_, next_obs_, action, reward, done = self.buffer[i].sample(BATCH_SIZE)
+            obs_, next_obs_, action, reward, done = self.buffer.sample(BATCH_SIZE)
             obs.append(obs_) # (B, obs_dim)
             next_obs.append(next_obs_) # (B, obs_dim)
             actions.append(action) # (B, act_dim)
             rewards.append(reward) # (B, 1)
             dones.append(done) # (B, 1)
         
-        obs = [torch.tensor(np.vstack(obs[i]), dtype=torch.float32).to(self.device) for i in range(self.n_agents)] # 
+        obs = [torch.tensor(np.vstack(obs[i]), dtype=torch.float32).to(self.device) for i in range(self.n_agents)]
         actions = [torch.tensor(np.vstack(actions[i]), dtype=torch.float32).to(self.device) for i in range(self.n_agents)]
         next_obs = [torch.tensor(np.vstack(next_obs[i]), dtype=torch.float32).to(self.device) for i in range(self.n_agents)]
         rewards = [torch.tensor(rewards[i], dtype=torch.float32).to(self.device).to(self.device) for i in range(self.n_agents)]
@@ -197,67 +197,66 @@ class MADDPG:
         next_obs_all = torch.cat(next_obs, dim=1)
         # (B, n_agents * obs_dim), (B, n_agents * act_dim), (B, n_agents * obs_dim)
 
-
         total_actor_loss = 0
         total_critic_loss = 0
         total_q_value = 0
 
         with torch.no_grad():
-            next_actions = [self.agents[i].target_actor(next_obs[i]) for i in range(self.n_agents)] # [(B, act_dim)] * n_agents
+            next_actions = [self.agent.target_actor(next_obs[i]) for i in range(self.n_agents)] # [(B, act_dim)] * n_agents
             next_actions_all = torch.cat(next_actions, dim=1) # (B, n_agents * act_dim)
             
         for i in range(self.n_agents):
             with torch.no_grad():
                 # A centric Q value
-                target_Q = self.agents[i].target_critic(next_obs_all, next_actions_all) # (B, 1)
+                target_Q = self.agent.target_critic(next_obs_all, next_actions_all) # (B, 1)
                 y = rewards[i] + GAMMA * (1 - dones[i]) * target_Q # (B, 1)
             
             # critic loss
-            current_Q = self.agents[i].critic(obs_all, actions_all)
+            current_Q = self.agent.critic(obs_all, actions_all)
             critic_loss = nn.MSELoss()(current_Q, y)
-            self.agents[i].learn_critic(critic_loss)
+            self.agent.learn_critic(critic_loss)
 
             # actor loss
-            # curr_actions = [self.agents[j].actor(obs[j]) if j == i 
+            # curr_actions = [self.agent.actor(obs[j]) if j == i 
             #                 else actions[j].detach() 
             #                 for j in range(self.n_agents)] # [(B, act_dim)] * n_agents
-            # curr_actions_all = torch.cat(curr_actions, dim=1) # (B, n_agents * act_dim)
 
-            # Communication loss
+            # Replace communication part of actions with communication action under current observation
+            replace_comms = self.agent.actor.sample(obs[i])[:,-DIM_C:]
             comm_next_obs = []
-            comm_actions = []
             for j in range(self.n_agents):
-                comm_next_obs.append(torch.cat((next_obs[j][:, :-DIM_C], actions[i][:, -DIM_C:]), dim=-1))
-                comm_actions.append(self.agents[j].actor(comm_next_obs[j]).detach())
-            comm_next_obs_all = torch.cat(comm_next_obs, dim=1) # (B, n_agents * obs_dim)
+                comm_next_obs.append(torch.cat((next_obs[j][:,:-DIM_C], replace_comms), dim=-1))
+            comm_next_obs_all = torch.cat(comm_next_obs, dim=1)
 
-            comm_next_actions = [self.agents[j].actor(comm_next_obs[j]) if j == i 
-                            else comm_actions[j].detach()
-                            for j in range(self.n_agents)] # [(B, act_dim)] * n_agents
-            comm_next_actions_all = torch.cat(comm_next_actions, dim=1) # (B, n_agents * act_dim)
-            q_com = self.agents[i].critic(comm_next_obs_all, comm_next_actions_all)
+            # Sample the next actions again with the modified observations
+            # This is to ensure that the communication part of the actions is updated
+            comm_sample_actions = []
+            for j in range(self.n_agents):
+                sample_actions = self.agent.actor.sample(comm_next_obs[j])
+                comm_sample_actions.append(sample_actions)
 
-            # actor_loss = -self.agents[i].critic(obs_all, curr_actions_all).mean()
+            comm_sample_actions_all = torch.cat(comm_sample_actions, dim=1)
+            q_com = self.agent.critic(comm_next_obs_all, comm_sample_actions_all)
+
+            # actor_loss = -self.agent.critic(obs_all, curr_actions_all).mean()
             # actor_loss -= 0.5 * q_com.mean()  # Communication loss
             actor_loss = (-q_com / N_AGENTS).mean()
-            self.agents[i].learn_actor(actor_loss)
+            self.agent.learn_actor(actor_loss)
 
             total_actor_loss += actor_loss.item()
             total_critic_loss += critic_loss.item()
             total_q_value += y.mean().item()
 
-            self.agents[i].update_targets()
+            self.agent.update_targets()
 
         return total_actor_loss / self.n_agents, total_critic_loss / self.n_agents, total_q_value / self.n_agents
 
     def save_models(self, save_dir='checkpoints'):
         os.makedirs(save_dir, exist_ok=True)
-        for agent in self.agents.values():
-            agent.save(save_dir=save_dir)
+        self.agent.save(save_dir=save_dir)
         
     def load_models(self, save_dir='checkpoints'):
-        for agent in self.agents.values():
-            agent.load(save_dir=save_dir)
+        self.agent.load(save_dir=save_dir)
 
 # ==== Training Loop ====
 def main():
@@ -329,7 +328,7 @@ def main():
 
             # multi_agent.add(obs, next_obs, actions, rewards, dones)
             multi_agent.add(obs, next_obs, actions, incremental_rewards, dones)
-            actor_loss, critic_loss, q_value = multi_agent.train(env)
+            actor_loss, critic_loss, q_value = multi_agent.train()
             obs = next_obs
 
             if actor_loss != 0.0 or critic_loss != 0.0:
