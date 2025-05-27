@@ -14,27 +14,27 @@ import sys
 sys.path.insert(0,'multiagent-particle-envs')
 from make_env import make_env
 
-ENV_NAME = "multiple_reference"
-N_AGENTS = 2
+ENV_NAME = "multiple_reference_broadcast"
+N_AGENTS = 3
 DIM_C = 10
-SHARED_REWARD = 1
+SHARED_REWARD = 0
 act_u_dim = 2
-REWARD_ALPHA = 0  # the weight of learning communication vs. movement
+REWARD_ALPHA = 0 # the weight of learning communication vs. movement
 
-SAVE_DIR = f"maddpg_{ENV_NAME}_{N_AGENTS}_{DIM_C}_{SHARED_REWARD}_{REWARD_ALPHA}_{act_u_dim}" #'models/'
+SAVE_DIR = f"maddpg_{ENV_NAME}_{N_AGENTS}_{DIM_C}_{SHARED_REWARD}_{REWARD_ALPHA}_{act_u_dim}_mut_broadcast" #'models/'
 
 # ==== Hyperparameters ====
-HIDDEN_DIM = 128 #32
-LR_ACTOR = 3e-4 # 1e-3 #
-LR_CRITIC = 3e-4 # 1e-3 #
-GAMMA = 0.95
-TAU = 0.005
-BATCH_SIZE = 256
-WARMUP_SIZE = 1024
-BUFFER_SIZE = int(1e6)
-EPISODES = 30000
-STEPS_PER_EPISODE = 100 #00
-CLIP_NORM = 1
+HIDDEN_DIM = 512 #32
+LR_ACTOR = 1e-4
+LR_CRITIC = 1e-4
+GAMMA = 0.9
+TAU = 0.01
+BATCH_SIZE = 1024
+BUFFER_SIZE = int(3e4)
+EPISODES = 100000
+STEPS_PER_EPISODE = 30
+
+WARMUP_SIZE = STEPS_PER_EPISODE * 100
 NOISE_SCALE = 0.1
 
 
@@ -44,7 +44,6 @@ class Actor(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(obs_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, act_dim), nn.Tanh()
         )
@@ -58,7 +57,6 @@ class Critic(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(total_obs_dim + total_act_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, 1)
         )
@@ -112,13 +110,11 @@ class Agent:
     def learn_actor(self, actor_loss):
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
-        # nn.utils.clip_grad_norm_(self.actor.parameters(), CLIP_NORM)
         self.actor_optimizer.step()
         
     def learn_critic(self, critic_loss):
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
-        # nn.utils.clip_grad_norm_(self.critic.parameters(), CLIP_NORM)
         self.critic_optimizer.step()
 
     def update_targets(self):
@@ -137,8 +133,6 @@ class MADDPG:
         self.obs_dim = obs_dim
         self.act_dim = act_dim
         self.act_u_dim = act_u_dim
-
-        self.clip_norm = True
 
         self.agents = {
             agent_id: Agent(obs_dim, act_dim, agent_id=agent_id, 
@@ -178,7 +172,7 @@ class MADDPG:
         for i in range(self.n_agents):
             self.buffer[i].add(obs[i], next_obs[i], actions[i], rewards[i], dones[i])
 
-    def train(self):
+    def train(self, env):
         if len(self.buffer[0]) < WARMUP_SIZE:
             return 0.0, 0.0, 0.0
 
@@ -203,6 +197,7 @@ class MADDPG:
         next_obs_all = torch.cat(next_obs, dim=1)
         # (B, n_agents * obs_dim), (B, n_agents * act_dim), (B, n_agents * obs_dim)
 
+
         total_actor_loss = 0
         total_critic_loss = 0
         total_q_value = 0
@@ -210,7 +205,7 @@ class MADDPG:
         with torch.no_grad():
             next_actions = [self.agents[i].target_actor(next_obs[i]) for i in range(self.n_agents)] # [(B, act_dim)] * n_agents
             next_actions_all = torch.cat(next_actions, dim=1) # (B, n_agents * act_dim)
-
+            
         for i in range(self.n_agents):
             with torch.no_grad():
                 # A centric Q value
@@ -223,11 +218,28 @@ class MADDPG:
             self.agents[i].learn_critic(critic_loss)
 
             # actor loss
-            curr_actions = [self.agents[j].actor(obs[j]) if j == i 
-                            else actions[j].detach() 
+            # curr_actions = [self.agents[j].actor(obs[j]) if j == i 
+            #                 else actions[j].detach() 
+            #                 for j in range(self.n_agents)] # [(B, act_dim)] * n_agents
+            # curr_actions_all = torch.cat(curr_actions, dim=1) # (B, n_agents * act_dim)
+
+            # Communication loss
+            comm_next_obs = []
+            comm_actions = []
+            for j in range(self.n_agents):
+                comm_next_obs.append(torch.cat((next_obs[j][:, :-DIM_C], actions[i][:, -DIM_C:]), dim=-1))
+                comm_actions.append(self.agents[j].actor(comm_next_obs[j]).detach())
+            comm_next_obs_all = torch.cat(comm_next_obs, dim=1) # (B, n_agents * obs_dim)
+
+            comm_next_actions = [self.agents[j].actor(comm_next_obs[j]) if j == i 
+                            else comm_actions[j].detach()
                             for j in range(self.n_agents)] # [(B, act_dim)] * n_agents
-            curr_actions_all = torch.cat(curr_actions, dim=1) # (B, n_agents * act_dim)
-            actor_loss = -self.agents[i].critic(obs_all, curr_actions_all).mean()
+            comm_next_actions_all = torch.cat(comm_next_actions, dim=1) # (B, n_agents * act_dim)
+            q_com = self.agents[i].critic(comm_next_obs_all, comm_next_actions_all)
+
+            # actor_loss = -self.agents[i].critic(obs_all, curr_actions_all).mean()
+            # actor_loss -= 0.5 * q_com.mean()  # Communication loss
+            actor_loss = (-q_com / N_AGENTS).mean()
             self.agents[i].learn_actor(actor_loss)
 
             total_actor_loss += actor_loss.item()
@@ -264,7 +276,6 @@ def main():
     print("- BUFFER_SIZE: ", BUFFER_SIZE, flush=True)
     print("- EPISODES: ", EPISODES, flush=True)
     print("- STEPS_PER_EPISODE: ", STEPS_PER_EPISODE, flush=True)
-    print("- CLIP_NORM: ", CLIP_NORM, flush=True)
     print("- NOISE_SCALE: ", NOISE_SCALE, flush=True)
     print("- WARMUP_SIZE: ", WARMUP_SIZE, flush=True)
     print("- HIDDEN_DIM: ", HIDDEN_DIM, flush=True)
@@ -318,7 +329,7 @@ def main():
 
             # multi_agent.add(obs, next_obs, actions, rewards, dones)
             multi_agent.add(obs, next_obs, actions, incremental_rewards, dones)
-            actor_loss, critic_loss, q_value = multi_agent.train()
+            actor_loss, critic_loss, q_value = multi_agent.train(env)
             obs = next_obs
 
             if actor_loss != 0.0 or critic_loss != 0.0:
@@ -329,7 +340,7 @@ def main():
             if dones.all():
                 break
 
-        returns.append(total_reward.mean())
+        returns.append(total_reward.sum())
         for i in range(N_AGENTS):
             return_dict[i].append(total_reward[i])
         ep_actor_losses.append(np.mean(actor_losses))

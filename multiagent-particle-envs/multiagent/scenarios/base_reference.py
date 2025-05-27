@@ -12,11 +12,12 @@ class BaseReferenceScenario(BaseScenario):
         self.norm_direction = False
         self.landmark_movable = False
 
-    def make_world(self, n_agents=2, n_landmarks=None, shared_reward=0.5, dim_c=10, reward_alpha = 1):
+    def make_world(self, n_agents=2, n_landmarks=None, shared_reward=0.5, dim_c=10, reward_alpha = 1, training=True):
         self.n_agents = n_agents
         self.n_landmarks = n_landmarks if n_landmarks is not None else self.n_agents
         self.shared_reward = shared_reward
         self.reward_alpha = reward_alpha
+        self.training = training
 
         world = World()
         # set any world properties first
