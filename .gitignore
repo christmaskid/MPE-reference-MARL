@@ -3,7 +3,7 @@
 *fail*
 *.gif
 *.log
-# *.png
+*.png
 # *.jpg
 *.pth
 # *maddpg_*/*
