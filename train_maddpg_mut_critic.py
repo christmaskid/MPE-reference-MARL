@@ -21,7 +21,7 @@ SHARED_REWARD = 0
 act_u_dim = 2
 REWARD_ALPHA = 0 # the weight of learning communication vs. movement
 
-SAVE_DIR = f"maddpg_{ENV_NAME}_{N_AGENTS}_{DIM_C}_{SHARED_REWARD}_{REWARD_ALPHA}_{act_u_dim}_mut_broadcast" #'models/'
+SAVE_DIR = f"maddpg_{ENV_NAME}_{N_AGENTS}_{DIM_C}_{SHARED_REWARD}_{REWARD_ALPHA}_{act_u_dim}_mut_broadcast_128x4" #'models/'
 
 # ==== Hyperparameters ====
 HIDDEN_DIM = 512 #32
@@ -33,10 +33,9 @@ BATCH_SIZE = 1024
 BUFFER_SIZE = int(3e4)
 EPISODES = 100000
 STEPS_PER_EPISODE = 30
-
 WARMUP_SIZE = STEPS_PER_EPISODE * 100 * N_AGENTS  # 100 episodes
 NOISE_SCALE = 0.1
-
+CLIP_NORM = 1
 
 # ==== Actor ====
 class Actor(nn.Module):
@@ -65,16 +64,33 @@ class Actor(nn.Module):
 
 # ==== Critic ====
 class Critic(nn.Module):
-    def __init__(self, total_obs_dim, total_act_dim, hidden_dim=HIDDEN_DIM):
+    def __init__(self, obs_dim, act_dim, n_agents, hidden_dim=HIDDEN_DIM):
         super().__init__()
+        self.obs_dim = obs_dim
+        self.act_dim = act_dim
+        self.n_agents = n_agents
+        total_obs_dim = obs_dim * n_agents
+        total_act_dim = act_dim * n_agents
+
         self.net = nn.Sequential(
             nn.Linear(total_obs_dim + total_act_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, 1)
         )
 
-    def forward(self, obs_all, act_all):
+    def forward(self, obs_all, act_all, idx=0):
         act_u_all = act_all[:, :act_u_dim*N_AGENTS]  # Only movement actions
+
+        if idx != 0:
+            # swap idx and 0
+            obs_all = torch.cat([obs_all[:, idx * self.obs_dim:(idx + 1) * self.obs_dim],
+                                 obs_all[:, :idx * self.obs_dim],
+                                 obs_all[:, (idx + 1) * self.obs_dim:]], dim=-1)
+            act_u_all = torch.cat([act_u_all[:, idx * act_u_dim:(idx + 1) * act_u_dim],
+                                 act_u_all[:, :idx * act_u_dim],
+                                 act_u_all[:, (idx + 1) * act_u_dim:]], dim=-1)
+        # (B, n_agents * obs_dim), (B, n_agents * act_u_dim)
+
         x = torch.cat([obs_all, act_u_all], dim=-1)
         return self.net(x)
 
@@ -88,9 +104,9 @@ class Agent:
         self.device = device
 
         self.actor = Actor(obs_dim, act_dim).to(device)
-        self.critic = Critic(obs_dim * self.n_agents, act_u_dim * self.n_agents).to(device)
+        self.critic = Critic(obs_dim, act_u_dim, self.n_agents).to(device)
         self.target_actor = Actor(obs_dim, act_dim).to(device)
-        self.target_critic = Critic(obs_dim * self.n_agents, act_u_dim * self.n_agents).to(device)
+        self.target_critic = Critic(obs_dim, act_u_dim, self.n_agents).to(device)
 
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=LR_ACTOR)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=LR_CRITIC)
@@ -123,11 +139,13 @@ class Agent:
     def learn_actor(self, actor_loss):
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
+        nn.utils.clip_grad_norm_(self.actor.parameters(), CLIP_NORM)
         self.actor_optimizer.step()
         
     def learn_critic(self, critic_loss):
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
+        nn.utils.clip_grad_norm_(self.critic.parameters(), CLIP_NORM)
         self.critic_optimizer.step()
 
     def update_targets(self):
@@ -201,18 +219,16 @@ class MADDPG:
         total_critic_loss = 0
         total_q_value = 0
 
-        with torch.no_grad():
-            next_actions = [self.agent.target_actor(next_obs[i]) for i in range(self.n_agents)] # [(B, act_dim)] * n_agents
-            next_actions_all = torch.cat(next_actions, dim=1) # (B, n_agents * act_dim)
+        next_actions = [self.agent.target_actor(next_obs[i]) for i in range(self.n_agents)] # [(B, act_dim)] * n_agents
+        next_actions_all = torch.cat(next_actions, dim=1) # (B, n_agents * act_dim)
             
         for i in range(self.n_agents):
             with torch.no_grad():
-                # A centric Q value
-                target_Q = self.agent.target_critic(next_obs_all, next_actions_all) # (B, 1)
+                target_Q = self.agent.target_critic(next_obs_all, next_actions_all, i) # (B, 1)
                 y = rewards[i] + GAMMA * (1 - dones[i]) * target_Q # (B, 1)
             
             # critic loss
-            current_Q = self.agent.critic(obs_all, actions_all)
+            current_Q = self.agent.critic(obs_all, actions_all, i)
             critic_loss = nn.MSELoss()(current_Q, y)
             self.agent.learn_critic(critic_loss)
 
@@ -222,11 +238,19 @@ class MADDPG:
             #                 for j in range(self.n_agents)] # [(B, act_dim)] * n_agents
 
             # Replace communication part of actions with communication action under current observation
-            replace_comms = self.agent.actor.sample(obs[i])[:,-DIM_C:]
+            replace_actions = []
+            for j in range(self.n_agents):
+                action = self.agent.actor.sample(obs[j])
+                if i != j:
+                    action = action.detach()
+                replace_actions.append(action)
+            replace_actions_all = torch.cat(replace_actions, dim=1)
+            q = self.agent.critic(obs_all, replace_actions_all, i)
+
             comm_next_obs = []
             for j in range(self.n_agents):
-                comm_next_obs.append(torch.cat((next_obs[j][:,:-DIM_C], replace_comms), dim=-1))
-            comm_next_obs_all = torch.cat(comm_next_obs, dim=1)
+                comm_next_obs.append(torch.cat((next_obs[j][:,:-DIM_C], replace_actions[i][:, -DIM_C:]), dim=-1))
+            comm_next_obs_all = torch.cat(comm_next_obs, dim=1)  # (B, n_agents * obs_dim)
 
             # Sample the next actions again with the modified observations
             # This is to ensure that the communication part of the actions is updated
@@ -234,9 +258,11 @@ class MADDPG:
             for j in range(self.n_agents):
                 sample_actions = self.agent.actor.sample(comm_next_obs[j])
                 comm_sample_actions.append(sample_actions)
+            comm_sample_actions_all = torch.cat(comm_sample_actions, dim=1)  # (B, n_agents * act_dim)
 
-            comm_sample_actions_all = torch.cat(comm_sample_actions, dim=1)
-            q_com = self.agent.critic(comm_next_obs_all, comm_sample_actions_all)
+            q_com = torch.zeros_like(current_Q)
+            for j in range(self.n_agents):
+                q_com += self.agent.critic(comm_next_obs_all, comm_sample_actions_all, j)
 
             # actor_loss = -self.agent.critic(obs_all, curr_actions_all).mean()
             # actor_loss -= 0.5 * q_com.mean()  # Communication loss
@@ -278,6 +304,7 @@ def main():
     print("- NOISE_SCALE: ", NOISE_SCALE, flush=True)
     print("- WARMUP_SIZE: ", WARMUP_SIZE, flush=True)
     print("- HIDDEN_DIM: ", HIDDEN_DIM, flush=True)
+    print("- CLIP_NORM: ", CLIP_NORM, flush=True)
     print("========================================", flush=True)
 
 
@@ -367,14 +394,13 @@ def draw_result(returns, return_dict,actor_losses, critic_losses, q_values, save
     
     # Reward
     plt.subplot(1, 4, 1)
-    if print_single:
-        plt.plot(episodes, returns, label='Average Return')
-        plt.plot(episodes, smooth(returns, smooth_interval), label='Smoothed Return', color='red')
-    else:
-        for i in range(N_AGENTS):
-            plt.plot(episodes, return_dict[i], label='Agent {}'.format(i), alpha=0.5)
-        for i in range(N_AGENTS):
-            plt.plot(episodes, smooth(return_dict[i], smooth_interval), label='Agent {} smoothed'.format(i))
+    plt.plot(episodes, returns, label='Return')
+    plt.plot(episodes, smooth(returns, smooth_interval), label='Smoothed Return', color='red')
+    # if not print_single:
+    #     for i in range(N_AGENTS):
+    #         plt.plot(episodes, return_dict[i], label='Agent {}'.format(i), alpha=0.5)
+    #     for i in range(N_AGENTS):
+    #         plt.plot(episodes, smooth(return_dict[i], smooth_interval), label='Agent {} smoothed'.format(i))
     plt.legend()
     plt.xlabel("Episode")
     plt.ylabel("Return")

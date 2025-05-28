@@ -9,7 +9,7 @@ from make_env import make_env
 import imageio
 
 
-from train_maddpg_mut_critic import MADDPG, SHARED_REWARD, DIM_C
+from train_maddpg_mut_critic import MADDPG
 ENV_NAME = "multiple_reference_broadcast"
 N_AGENTS = 3
 DIM_C = 10
@@ -19,7 +19,7 @@ REWARD_ALPHA = 0 # the weight of learning communication vs. movement
 
 SAVE_DIR = f"maddpg_{ENV_NAME}_{N_AGENTS}_{DIM_C}_{SHARED_REWARD}_{REWARD_ALPHA}_{act_u_dim}_mut_broadcast" #'models/'
 
-STEPS_PER_EPISODE = 100
+STEPS_PER_EPISODE = 30
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
