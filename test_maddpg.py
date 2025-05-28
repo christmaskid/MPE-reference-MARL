@@ -17,9 +17,10 @@ SHARED_REWARD = 0
 act_u_dim = 2
 REWARD_ALPHA = 0 # the weight of learning communication vs. movement
 
-SAVE_DIR = f"maddpg_{ENV_NAME}_{N_AGENTS}_{DIM_C}_{SHARED_REWARD}_{REWARD_ALPHA}_{act_u_dim}_mut_broadcast" #'models/'
+SAVE_DIR = "maddpg_new"
+# SAVE_DIR = f"maddpg_{ENV_NAME}_{N_AGENTS}_{DIM_C}_{SHARED_REWARD}_{REWARD_ALPHA}_{act_u_dim}_mut_broadcast" #'models/'
 
-STEPS_PER_EPISODE = 30
+STEPS_PER_EPISODE = 25
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -81,7 +82,7 @@ def main():
         print("Total reward for episode {}: {}".format(ep, total_reward), flush=True)
         
         # Save frames as gif
-        save_path = os.path.join(SAVE_DIR, 'maddpg_test_{}_{}_out{}.gif'.format(ENV_NAME, N_AGENTS, ep))
+        save_path = os.path.join(SAVE_DIR, 'out{}.gif'.format(ep))
         imageio.mimsave(save_path, frames, duration=0.01)
         print("Saved episode as {}".format(save_path))
         print("Total reward:", total_reward.sum(), flush=True)
