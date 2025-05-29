@@ -1,0 +1,37 @@
+/mnt/c/Users/user/Desktop/11大五下/DRL/final/MPE-reference-MARL/multiagent-particle-envs/multiagent/__init__.py:23: UserWarning: This code base is no longer maintained, and is not expected to be maintained again in the future. 
+For the past handful of years, these environments been maintained inside of PettingZoo (see https://pettingzoo.farama.org/environments/mpe/). 
+This maintained version includes documentation, support for the PettingZoo API, support for current versions of Python, numerous bug fixes, 
+support for installation via pip, and numerous other large quality of life improvements. 
+We encourage researchers to switch to this maintained version for all purposes other than comparing to results run on this version of the environments. 
+
+  warnings.warn("This code base is no longer maintained, and is not expected to be maintained again in the future. \n"
+  0%|          | 0/3000 [00:00<?, ?it/s]reward:-83.66794:   0%|          | 0/3000 [00:00<?, ?it/s]/root/miniconda3/envs/drl_final/lib/python3.10/site-packages/numpy/_core/fromnumeric.py:3860: RuntimeWarning: Mean of empty slice.
+  return _methods._mean(a, axis=axis, dtype=dtype,
+/root/miniconda3/envs/drl_final/lib/python3.10/site-packages/numpy/_core/_methods.py:145: RuntimeWarning: invalid value encountered in scalar divide
+  ret = ret.dtype.type(ret / rcount)
+Episode 0: return nan, actor loss nan, critic loss nan
+reward:-83.66794:   0%|          | 0/3000 [00:00<?, ?it/s]
+Traceback (most recent call last):
+  File "/mnt/c/Users/user/Desktop/11大五下/DRL/final/MPE-reference-MARL/train_maddpg_mut_critic.py", line 373, in <module>
+    main()
+  File "/mnt/c/Users/user/Desktop/11大五下/DRL/final/MPE-reference-MARL/train_maddpg_mut_critic.py", line 334, in main
+    draw_result(returns, ep_actor_losses, ep_critic_losses)
+  File "/mnt/c/Users/user/Desktop/11大五下/DRL/final/MPE-reference-MARL/train_maddpg_mut_critic.py", line 369, in draw_result
+    plt.savefig(SAVE_DIR+"/training_curves.png")  # or plt.show() if you prefer
+  File "/root/miniconda3/envs/drl_final/lib/python3.10/site-packages/matplotlib/pyplot.py", line 1251, in savefig
+    res = fig.savefig(*args, **kwargs)  # type: ignore[func-returns-value]
+  File "/root/miniconda3/envs/drl_final/lib/python3.10/site-packages/matplotlib/figure.py", line 3490, in savefig
+    self.canvas.print_figure(fname, **kwargs)
+  File "/root/miniconda3/envs/drl_final/lib/python3.10/site-packages/matplotlib/backend_bases.py", line 2184, in print_figure
+    result = print_method(
+  File "/root/miniconda3/envs/drl_final/lib/python3.10/site-packages/matplotlib/backend_bases.py", line 2040, in <lambda>
+    print_method = functools.wraps(meth)(lambda *args, **kwargs: meth(
+  File "/root/miniconda3/envs/drl_final/lib/python3.10/site-packages/matplotlib/backends/backend_agg.py", line 481, in print_png
+    self._print_pil(filename_or_obj, "png", pil_kwargs, metadata)
+  File "/root/miniconda3/envs/drl_final/lib/python3.10/site-packages/matplotlib/backends/backend_agg.py", line 430, in _print_pil
+    mpl.image.imsave(
+  File "/root/miniconda3/envs/drl_final/lib/python3.10/site-packages/matplotlib/image.py", line 1657, in imsave
+    image.save(fname, **pil_kwargs)
+  File "/root/miniconda3/envs/drl_final/lib/python3.10/site-packages/PIL/Image.py", line 2576, in save
+    fp = builtins.open(filename, "w+b")
+FileNotFoundError: [Errno 2] No such file or directory: 'maddpg_direct_2agents_3000/training_curves.png'
