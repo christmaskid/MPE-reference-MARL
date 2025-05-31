@@ -10,23 +10,27 @@ import imageio
 
 
 from train_maddpg_mut_critic import MADDPG
-ENV_NAME = "multiple_reference_broadcast"
-N_AGENTS = 3
 DIM_C = 10
 SHARED_REWARD = 0
 act_u_dim = 2
 REWARD_ALPHA = 0 # the weight of learning communication vs. movement
 
-SAVE_DIR = "maddpg_new"
+# SAVE_DIR = "maddpg_new"
+ENV_NAME = "multiple_reference_broadcast" # direct" # 
+N_AGENTS = 2
+EPISODES = 3000
+SAVE_DIR = "results/maddpg_"+(ENV_NAME.split("_")[-1])+"_"+str(N_AGENTS)+"agents_"+str(EPISODES)
 # SAVE_DIR = f"maddpg_{ENV_NAME}_{N_AGENTS}_{DIM_C}_{SHARED_REWARD}_{REWARD_ALPHA}_{act_u_dim}_mut_broadcast" #'models/'
 
-STEPS_PER_EPISODE = 25
+STEPS_PER_EPISODE = 64
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    env = make_env(ENV_NAME, n_agents=N_AGENTS, n_landmarks=N_AGENTS,
+    env = make_env(ENV_NAME, n_agents=5, n_landmarks=3, #n_agents=N_AGENTS, n_landmarks=N_AGENTS,
                    shared_reward=SHARED_REWARD, dim_c=DIM_C, reward_alpha=REWARD_ALPHA, training=False)
     env.reset()
+    np.random.seed(0)
+    torch.manual_seed(0)
 
     print("Testing environment: ", ENV_NAME)
     print("Number of agents: ", N_AGENTS)
@@ -83,12 +87,14 @@ def main():
         
         # Save frames as gif
         save_path = os.path.join(SAVE_DIR, 'out{}.gif'.format(ep))
-        imageio.mimsave(save_path, frames, duration=0.01)
+        imageio.mimsave(save_path, frames, duration=0.01, save_all=True, append_images=frames[1:], optimize=True, loop=0)
+        save_img_path = os.path.join(SAVE_DIR, 'out{}.png'.format(ep))
+        imageio.imwrite(save_img_path, frames[-1])
         print("Saved episode as {}".format(save_path))
-        print("Total reward:", total_reward.sum(), flush=True)
-        avg_total_reward += total_reward.sum()
+        print(f"Average Total reward for each agent: {total_reward.mean()}", f"{total_reward}", flush=True)
+        avg_total_reward += total_reward.mean()
     
-    print("Average total reward over 10 episodes:", avg_total_reward / 10, flush=True)
+    print("Average total reward over 10 episodes for each agent:", avg_total_reward / 10, flush=True)
     env.close()
 
 if __name__ == "__main__":
