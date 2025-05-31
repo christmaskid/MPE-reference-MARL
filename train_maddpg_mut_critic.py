@@ -14,6 +14,11 @@ from tqdm import tqdm
 os.environ['SUPPRESS_MA_PROMPT']='1'
 
 # ==== Hyperparameters ====
+ENV_NAME = "multiple_reference_broadcast"
+N_AGENTS = 3
+EPISODES = 3000
+SAVE_DIR = "maddpg_"+(ENV_NAME.split("_")[-1])+"_"+str(N_AGENTS)+"agents_"+str(EPISODES)
+
 LR_ACTOR = 1e-5
 LR_CRITIC = 1e-5
 LR_ALPHA = 1e-5
@@ -21,9 +26,7 @@ GAMMA = 0.9
 TAU = 0.01
 BATCH_SIZE = 1024
 BUFFER_SIZE = int(3e4)
-EPISODES = 10000
 STEPS_PER_EPISODE = 30
-N_AGENTS = 3
 WARMUP_EP = 100
 COMM_DIM = 10
 NOISE_SCALE = 0.1
@@ -32,7 +35,7 @@ NOISE_SCALE = 0.1
 class Actor(nn.Module):
     def __init__(self, obs_dim, hid_dim, act_dim):
         super().__init__()
-        self.fc = nn.Sequential(
+        self.fc = nn.Sequential( 
                 nn.Linear(obs_dim, hid_dim), nn.SiLU(),
                 nn.Linear(hid_dim, hid_dim), nn.SiLU(),
                 nn.Linear(hid_dim, hid_dim), nn.SiLU(),
@@ -138,6 +141,9 @@ class MADDPG:
         self.actor = Actor(obs_dim=obs_dim,
                              hid_dim=512,
                              act_dim=act_dim).to(device)
+        self.target_actor = Actor(obs_dim=obs_dim,
+                             hid_dim=512,
+                             act_dim=act_dim).to(device)
 
         self.critic = Critic(obs_dim=(obs_dim-COMM_DIM) * n_agents,
                                 hid_dim=512,
@@ -147,6 +153,7 @@ class MADDPG:
                                        hid_dim=512,
                                        act_dim=(act_dim-COMM_DIM) * n_agents).to(device)
 
+        self.target_actor.load_state_dict(self.actor.state_dict())
         self.target_critic.load_state_dict(self.critic.state_dict())
 
         self.actor_optim = optim.Adam(self.actor.parameters(), lr=LR_ACTOR)
@@ -195,7 +202,7 @@ class MADDPG:
         for i in range(self.n_agents):
             next_obs_i = next_obs_all[i]
             with torch.no_grad():
-                next_actions = self.actor.sample(next_obs_i)
+                next_actions = self.target_actor.sample(next_obs_i)
                 next_actions_all.append(next_actions)
 
         # (n_agents, B, act)
@@ -251,6 +258,8 @@ class MADDPG:
             self.actor_optim.step()
             total_actor_loss += loss_pi.item()
 
+        for param, target_param in zip(self.actor.parameters(), self.target_actor.parameters()):
+            target_param.data.copy_(TAU * param.data + (1 - TAU) * target_param.data)
 
         for param, target_param in zip(self.critic.parameters(), self.target_critic.parameters()):
             target_param.data.copy_(TAU * param.data + (1 - TAU) * target_param.data)
@@ -284,7 +293,7 @@ class MADDPG:
 # ==== Training Loop ====
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    env = make_env("multiple_reference_broadcast", n_agents=N_AGENTS)
+    env = make_env(ENV_NAME, n_agents=N_AGENTS)
     env.reset()
     obs_dims = env.observation_space[0].shape[0]
     act_dims = sum([sp.shape[0] for sp in env.action_space[0].spaces])
@@ -331,7 +340,7 @@ def main():
             draw_result(returns, ep_actor_losses, ep_critic_losses)
 
         if episode % 100 == 0:  # adjust frequency
-            agent.save_models(save_dir='maddpg_new/')
+            agent.save_models(save_dir=SAVE_DIR)
 
 def draw_result(returns, actor_losses, critic_losses):
     episodes = range(1, len(returns) + 1)
@@ -363,7 +372,7 @@ def draw_result(returns, actor_losses, critic_losses):
     plt.grid(True)
 
     plt.tight_layout()
-    plt.savefig("maddpg_new/training_curves.png")  # or plt.show() if you prefer
+    plt.savefig(SAVE_DIR+"/training_curves.png")  # or plt.show() if you prefer
     plt.close()
 
 if __name__ == '__main__':
