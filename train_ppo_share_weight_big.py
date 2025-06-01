@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from collections import deque, namedtuple
 # from pettingzoo.mpe import simple_reference_v3
 import os
+import csv
 import matplotlib.pyplot as plt
 # from gymnasium.spaces import Box
 
@@ -127,7 +128,7 @@ class PPOAgent:
         self.buffer = []
         self.batch_size = 64
 
-        self.gamma = 0.99
+        self.gamma = 0.9
         self.lam = 0.95
         ep = 0.2
         self.min_ratio = 1-ep
@@ -254,8 +255,19 @@ def train(env, epoches):
     critic_losses = []
     entropy_losses = []
 
+    log_path = "training_log.csv"
+    log_header = [
+        "epoch", "avg_reward",
+        "total_loss", "actor_loss", "critic_loss", "entropy_loss"
+    ]
+
+    # Create the log file and write header if it doesn't exist
+    if not os.path.exists(log_path):
+        with open(log_path, mode='w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(log_header)
     
-    max_step_per_game = 30
+    max_step_per_game = 25
     max_steps = 32 * max_step_per_game
     max_returns = np.array([-np.inf, -np.inf])
     check_peroid = 10
@@ -321,28 +333,27 @@ def train(env, epoches):
         
         if epoch % 1 == 0:
             avg_rew = np.mean(episode_rewards, axis = 0)
-            print(f"Epoch {epoch}, Average Reward: {avg_rew[0]:.2f}, {avg_rew[1]:.2f}", flush=True)#, Loss: {total_loss:.4f}, Actor Loss: {actor_loss:.4f}, Critic Loss: {critic_loss:.4f}, Entropy Loss: {entropy_loss:.4f}")
+            # tqdm.write(f"Epoch {epoch}, Average Reward: {avg_rew[0]:.2f}, {avg_rew[1]:.2f}", flush=True)#, Loss: {total_loss:.4f}, Actor Loss: {actor_loss:.4f}, Critic Loss: {critic_loss:.4f}, Entropy Loss: {entropy_loss:.4f}")
             
             
         if epoch % check_peroid == 0:
-            print(f"Epoch {epoch}:")
+            tqdm.write(f"Epoch {epoch}:")
             for i in range(len(mean_total_losses)):
-                print(
+                tqdm.write(
                     f"Agent {i} -- Total: {mean_total_losses[i]:.4f}, "
                     f"Average Reward: {avg_rew[0]:.2f}, {avg_rew[1]:.2f}, "
                     f"Actor: {mean_actor_losses[i]:.4f}, "
                     f"Critic: {mean_critic_losses[i]:.4f}, "
                     f"Entropy: {mean_entropy_losses[i]:.4f}",
-                    flush=True
                 )
             # save model
             eval_returns = eval(env, agent, max_step_per_game)
             tqdm.write(f"{eval_returns}")
-            # if eval_returns[0] > max_returns[0] and eval_returns[1] > max_returns[1]:
-            tqdm.write(f"Save model with evaluation returns: {eval_returns}")
-            max_returns = eval_returns
-            # for i in range(agent.n_agents):
-            torch.save(agent.model.state_dict(), f"PPO_agent_{N_AGENTS}_broadcast.pth")
+            if eval_returns[0] > max_returns[0] and eval_returns[1] > max_returns[1]:
+                tqdm.write(f"Save model with evaluation returns: {eval_returns}")
+                max_returns = eval_returns
+                # for i in range(agent.n_agents):
+                torch.save(agent.model.state_dict(), f"PPO_agent_{N_AGENTS}_agent.pth")
 
             # average reward for two agents
             returns.append(avg_rew)
@@ -352,6 +363,17 @@ def train(env, epoches):
             actor_losses.append(mean_actor_losses)
             critic_losses.append(mean_critic_losses)
             entropy_losses.append(mean_entropy_losses)
+
+            with open(log_path, mode='a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    epoch,
+                    avg_rew.mean(),
+                    np.mean(mean_total_losses),
+                    np.mean(mean_actor_losses),
+                    np.mean(mean_critic_losses),
+                    np.mean(mean_entropy_losses)
+                ])
 
             plot(returns, actor_losses, critic_losses, entropy_losses, check_peroid)
 
@@ -443,13 +465,13 @@ def plot(returns, actor_losses, critic_losses, entropy_losses, check_peroid):
     axes[1, 1].legend()
 
     plt.tight_layout()  # Adjust layout to prevent overlap
-    plt.savefig("training_summary_broadcast.png")
+    plt.savefig("training_summary.png")
     plt.close()
 
 
 def main():
     # env = simple_reference_v3.parallel_env(continuous_actions=True)
-    env = make_env("multiple_reference_broadcast", n_agents=N_AGENTS)
+    env = make_env("multiple_reference", n_agents=N_AGENTS)
     epoches = 3000
     train(env, epoches)
 

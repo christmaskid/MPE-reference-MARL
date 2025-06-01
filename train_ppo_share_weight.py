@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from collections import deque, namedtuple
 # from pettingzoo.mpe import simple_reference_v3
 import os
+import csv
 import matplotlib.pyplot as plt
 # from gymnasium.spaces import Box
 
@@ -17,7 +18,7 @@ from make_env import make_env
 
 os.environ['SUPPRESS_MA_PROMPT']='1'
 
-N_AGENTS = 4
+N_AGENTS = 3
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -109,7 +110,7 @@ class PPOAgent:
         self.buffer = []
         self.batch_size = 64
 
-        self.gamma = 0.99
+        self.gamma = 0.9
         self.lam = 0.95
         ep = 0.2
         self.min_ratio = 1-ep
@@ -121,8 +122,8 @@ class PPOAgent:
         actor_params = list(self.model.actor.parameters()) + [self.model.log_std]
         critic_params = self.model.critic.parameters()
 
-        self.actor_optimizer = optim.Adam(actor_params, lr=7e-4)
-        self.critic_optimizer = optim.Adam(critic_params, lr=1e-4)
+        self.actor_optimizer = optim.Adam(actor_params, lr=5e-5)
+        self.critic_optimizer = optim.Adam(critic_params, lr=5e-5)
 
         self.c1 = 0.5
         self.c2 = 0.01
@@ -236,6 +237,18 @@ def train(env, epoches):
     critic_losses = []
     entropy_losses = []
 
+    log_path = "training_log.csv"
+    log_header = [
+        "epoch", "avg_reward",
+        "total_loss", "actor_loss", "critic_loss", "entropy_loss"
+    ]
+
+    # Create the log file and write header if it doesn't exist
+    if not os.path.exists(log_path):
+        with open(log_path, mode='w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(log_header)
+
     
     max_step_per_game = 25
     max_steps = 32 * max_step_per_game
@@ -330,6 +343,17 @@ def train(env, epoches):
             critic_losses.append(mean_critic_losses)
             entropy_losses.append(mean_entropy_losses)
 
+            with open(log_path, mode='a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    epoch,
+                    avg_rew.mean(),
+                    np.mean(mean_total_losses),
+                    np.mean(mean_actor_losses),
+                    np.mean(mean_critic_losses),
+                    np.mean(mean_entropy_losses)
+                ])
+
             plot(returns, actor_losses, critic_losses, entropy_losses, check_peroid)
 
 def eval(env, agent, max_step_per_game):
@@ -377,7 +401,7 @@ def plot(returns, actor_losses, critic_losses, entropy_losses, check_peroid):
 
     # Subplot 1: Average Reward
     for agent_idx in range(num_agents):
-        x_vals = [i * 20 for i in range(len(returns))]
+        x_vals = [i * check_peroid for i in range(len(returns))]
         y_vals = [r[agent_idx] for r in returns]
         axes[0, 0].plot(x_vals, y_vals, label=f'Agent {agent_idx}')
     axes[0, 0].set_xlabel("Epochs")
@@ -424,7 +448,7 @@ def plot(returns, actor_losses, critic_losses, entropy_losses, check_peroid):
 def main():
     # env = simple_reference_v3.parallel_env(continuous_actions=True)
     env = make_env("multiple_reference", n_agents=N_AGENTS)
-    epoches = 300000
+    epoches = 3000
     train(env, epoches)
 
 if __name__ == "__main__":
