@@ -280,7 +280,13 @@ class MASAC:
             target_param.data.copy_(TAU * param.data + (1 - TAU) * target_param.data)
 
         return total_actor_loss / self.n_agents, total_critic_loss / self.n_agents
-
+        
+    def load_models(self, save_dir='checkpoints'):
+        actor_path = os.path.join(save_dir, f"agent_actor.pth")
+        critic_path = os.path.join(save_dir, f"agent_critic.pth")
+        self.actor.load_state_dict(torch.load(actor_path))
+        self.critic.load_state_dict(torch.load(critic_path))
+        
     def save_models(self, save_dir='checkpoints'):
         os.makedirs(save_dir, exist_ok=True)
         (actor, critic) = (self.actor, self.critic)
