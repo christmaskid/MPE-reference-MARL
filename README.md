@@ -48,5 +48,10 @@ Example:
 ```bash
 python test_maddpg.py --env_name multiple_reference_broadcast --n_agents 3 --episodes 3000 --render
 ```
+If you are running in a headless environment (e.g., a server without a display), use `xvfb-run` to enable rendering:
+```bash
+xvfb-run python test_maddpg.py --env_name multiple_reference_broadcast --n_agents 3 --episodes 3000 --render
+```
 
 Each script saves model checkpoints and training curves as appropriate. See script headers and code comments for further usage details.
+

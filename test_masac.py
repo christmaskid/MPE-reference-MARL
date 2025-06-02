@@ -9,7 +9,7 @@ from make_env import make_env
 import imageio
 
 
-from train_SAC import MASAC
+from train_masac import MASAC
 import argparse
 DIM_C = 10
 SHARED_REWARD = 0

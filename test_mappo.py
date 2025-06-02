@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from PIL import Image
 os.environ['SUPPRESS_MA_PROMPT']='1'
-from train_ppo_share_weight_broadcast_big import PPONet
+from train_mappo import PPONet
 import time
 import argparse
 
