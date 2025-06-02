@@ -1,21 +1,15 @@
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.distributions import Normal
 import sys
 sys.path.insert(0,'multiagent-particle-envs')
 from make_env import make_env
-from collections import deque
-import random
 import os
-import matplotlib.pyplot as plt
-from tqdm import tqdm
 from PIL import Image
 os.environ['SUPPRESS_MA_PROMPT']='1'
 from train_mappo import PPONet
 import time
 import argparse
+import imageio
 
 class PPOAgent:
     def __init__(self, env, n_agents, device):
@@ -37,7 +31,7 @@ class PPOAgent:
 
 
 def main():    
-    parser = argparse.ArgumentParser(description="Test MASAC on multi-agent particle environments.")
+    parser = argparse.ArgumentParser(description="Test MAPPO on multi-agent particle environments.")
     parser.add_argument("--env_name", type=str, required=True, help="Name of the environment")
     parser.add_argument("--n_agents", type=int, required=True, help="Number of agents")
     parser.add_argument("--episodes", type=int, default=3000, help="Number of training episodes")
@@ -51,7 +45,10 @@ def main():
     if args.save_dir is not None:
         SAVE_DIR = args.save_dir
     else:
-        SAVE_DIR = "results/mappo_" + (ENV_NAME.split("_")[-1]) + "_" + str(N_AGENTS) + "agents_" + str(EPISODES)
+        if ENV_NAME.split("_")[-1] == "reference":
+            SAVE_DIR = "results/mappo_direct" + "_" + str(N_AGENTS) + "agents_" + str(EPISODES)
+        else:
+            SAVE_DIR = "results/mappo_" + (ENV_NAME.split("_")[-1]) + "_" + str(N_AGENTS) + "agents_" + str(EPISODES)
         
     env = make_env(ENV_NAME, n_agents=N_AGENTS)
     env.reset()
@@ -81,10 +78,9 @@ def main():
 
             next_obs, rewards, dones, info = env.step(action_input)
             
-            if i == 0:
-                # if args.render:
-                frames.append(Image.fromarray(np.array(env.render(mode='rgb_array')[0])))
-                time.sleep(0.1)
+            if args.render:
+                frame = np.array(env.render(mode='rgb_array'))
+                frames.append(frame[0])
 
             total_reward += rewards
             next_obs = np.array(next_obs)
@@ -97,20 +93,11 @@ def main():
 
         agents_total_reward += total_reward.sum()
 
-    # for i in range(N_AGENTS):
-    #     ga = env.world.agents[i].goal_a.state.p_pos
-    #     gb = env.world.agents[i].goal_b.state.p_pos
-    #     c = env.agents[i].state.c
-    #     print(f'agent {i}:\n{obs[i]}')
-    #     print(f'{ga} to {gb} (mse:{((ga-gb)**2).mean()})')
-    #     print(f'{c}\n')
-
     print("Total reward: ", agents_total_reward / (10 * N_AGENTS))
-    # frames[0].save(f"test_{N_AGENTS}_agent.gif", save_all=True, append_images=frames[1:], optimize=True, loop=0)
     if args.render:
         if not os.path.exists(SAVE_DIR):
             os.makedirs(SAVE_DIR)
-        frames[0].save(os.path.join(SAVE_DIR, f"test_{N_AGENTS}_agent_broadcast.gif"), save_all=True, append_images=frames[1:], optimize=True, loop=0)
+        imageio.mimsave(os.path.join(SAVE_DIR, f"test_{N_AGENTS}_agent_broadcast.gif"), frames, duration=0.01)
 
     
 if __name__=="__main__":
