@@ -283,8 +283,8 @@ class MASAC:
     def load_models(self, save_dir='checkpoints'):
         actor_path = os.path.join(save_dir, f"agent_actor.pth")
         critic_path = os.path.join(save_dir, f"agent_critic.pth")
-        self.actor.load_state_dict(torch.load(actor_path))
-        self.critic.load_state_dict(torch.load(critic_path))
+        self.actor.load_state_dict(torch.load(actor_path, map_location=self.device))
+        self.critic.load_state_dict(torch.load(critic_path, map_location=self.device))
         
     def save_models(self, save_dir='checkpoints'):
         os.makedirs(save_dir, exist_ok=True)
