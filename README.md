@@ -41,7 +41,7 @@ python train_maddpg.py --env_name multiple_reference_broadcast --n_agents 3 --ep
 ### Testing Scripts
 
 - **test_maddpg.py**: Evaluate MADDPG or its communication-loss variant.
-- **test_sac.py**: Evaluate MASAC models.
+- **test_masac.py**: Evaluate MASAC models.
 - **test_mappo.py**: Evaluate MAPPO models.
 
 Example:

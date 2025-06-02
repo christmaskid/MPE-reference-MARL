@@ -373,7 +373,7 @@ def train(env, n_agents, epoches, save_dir):
                     np.mean(mean_entropy_losses)
                 ])
 
-            plot(returns, actor_losses, critic_losses, entropy_losses, check_peroid)
+            plot(returns, actor_losses, critic_losses, entropy_losses, check_peroid, save_dir)
 
 def eval(env, n_agents, agent, max_step_per_game):
     returns = []
@@ -415,7 +415,7 @@ def eval(env, n_agents, agent, max_step_per_game):
     return np.mean(np.array(returns), axis = 0)
 
 
-def plot(returns, actor_losses, critic_losses, entropy_losses, check_peroid):
+def plot(returns, actor_losses, critic_losses, entropy_losses, check_peroid, save_dir="results"):
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))  # 2 rows, 2 column
 
     returns_plot = np.array(returns)
@@ -463,7 +463,7 @@ def plot(returns, actor_losses, critic_losses, entropy_losses, check_peroid):
     axes[1, 1].legend()
 
     plt.tight_layout()  # Adjust layout to prevent overlap
-    plt.savefig("training_summary.png")
+    plt.savefig(os.path.join(save_dir, "training_summary.png"))
     plt.close()
 
 

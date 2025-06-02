@@ -42,7 +42,7 @@ def main():
         from train_maddpg import MADDPG
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    env = make_env(ENV_NAME, n_agents=5, n_landmarks=3, #n_agents=N_AGENTS, n_landmarks=N_AGENTS,
+    env = make_env(ENV_NAME, n_agents=N_AGENTS, n_landmarks=N_AGENTS,
                    shared_reward=SHARED_REWARD, dim_c=DIM_C, reward_alpha=REWARD_ALPHA, training=False)
     env.reset()
     np.random.seed(0)
@@ -59,8 +59,8 @@ def main():
 
     multi_agent = MADDPG(obs_dims, act_dims, act_u_dim, N_AGENTS, device)
     if os.path.exists(SAVE_DIR):
-        multi_agent.load_models(SAVE_DIR)
         print("Loaded models from", SAVE_DIR, flush=True)
+        multi_agent.load_models(SAVE_DIR)
     else:
         print("Model directory does not exist. Use random initialized model.", flush=True)
 

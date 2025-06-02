@@ -365,7 +365,7 @@ def draw_result(returns, actor_losses, critic_losses, save_dir='results'):
     plt.grid(True)
 
     plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, "/training_curves.png"))  # or plt.show() if you prefer
+    plt.savefig(os.path.join(save_dir, "training_curves.png"))  # or plt.show() if you prefer
     plt.close()
 
 if __name__ == '__main__':
