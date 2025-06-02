@@ -34,7 +34,7 @@ def main():
     if args.save_dir is not None:
         SAVE_DIR = args.save_dir
     else:
-        SAVE_DIR = "results/masac_" + (ENV_NAME.split("_")[-1]) + "_" + str(N_AGENTS) + "agents_" + str(EPISODES)
+        SAVE_DIR = "results/masac-commloss_" + (ENV_NAME.split("_")[-1]) + "_" + str(N_AGENTS) + "agents_" + str(EPISODES)
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env = make_env(ENV_NAME, n_agents=N_AGENTS, n_landmarks=N_AGENTS,
