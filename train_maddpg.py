@@ -14,11 +14,6 @@ from tqdm import tqdm
 os.environ['SUPPRESS_MA_PROMPT']='1'
 
 # ==== Hyperparameters ====
-ENV_NAME = "multiple_reference_broadcast"
-N_AGENTS = 2
-EPISODES = 3000
-SAVE_DIR = "maddpg_"+(ENV_NAME.split("_")[-1])+"_"+str(N_AGENTS)+"agents_"+str(EPISODES)
-
 LR_ACTOR = 1e-5
 LR_CRITIC = 1e-5
 LR_ALPHA = 1e-5
@@ -153,6 +148,7 @@ class MADDPG:
                                        hid_dim=512,
                                        act_dim=(act_dim-COMM_DIM) * n_agents).to(device)
 
+        self.target_actor.load_state_dict(self.actor.state_dict())
         self.target_critic.load_state_dict(self.critic.state_dict())
 
         self.actor_optim = optim.Adam(self.actor.parameters(), lr=LR_ACTOR)
@@ -226,19 +222,36 @@ class MADDPG:
             self.critic_optim.step()
             total_critic_loss += loss_q.item()
 
-            curr_actions = []
+            sample_actions_all = []
             for j in range(self.n_agents):
-                curr_action = self.actor(obs_all[j])
+                sample_actions = self.actor.sample(obs_all[j])
                 if i != j:
-                    curr_action = curr_action.detach()
-                curr_actions.append(curr_action)
-            curr_actions_all = torch.stack(curr_actions, dim=0)
-            actor_loss = -self.critic(obs_all, curr_actions_all, i).mean()
+                    sample_actions = sample_actions.detach()
+                sample_actions_all.append(sample_actions)
+            sample_actions_all = torch.stack(sample_actions_all, dim=0)
+
+            comm_sample_actions_all = []
+            comm_next_obs_all = []
+            for j in range(self.n_agents):
+                comm_next_obs_all.append(torch.cat((next_obs_all[j,:,:-self.comm_dim], sample_actions_all[i,:,-self.comm_dim:]), dim=-1))
+            comm_next_obs_all = torch.stack(comm_next_obs_all, dim=0)
+
+            for j in range(self.n_agents):
+                sample_actions = self.actor.sample(comm_next_obs_all[j])
+                comm_sample_actions_all.append(sample_actions)
+
+            comm_sample_actions_all = torch.stack(comm_sample_actions_all, dim=0)
+            q_com = torch.zeros_like(y)
+            for j in range(self.n_agents):
+                q_com += self.critic(comm_next_obs_all, comm_sample_actions_all, j)
+
             self.actor_optim.zero_grad()
-            actor_loss.backward()
+            loss_pi = (-q_com / self.n_agents).mean()
+            loss_pi.backward()
             nn.utils.clip_grad_norm_(self.actor.parameters(), self.clip_norm)
+
             self.actor_optim.step()
-            total_actor_loss += actor_loss.item()
+            total_actor_loss += loss_pi.item()
 
         for param, target_param in zip(self.actor.parameters(), self.target_actor.parameters()):
             target_param.data.copy_(TAU * param.data + (1 - TAU) * target_param.data)
@@ -274,6 +287,22 @@ class MADDPG:
 
 # ==== Training Loop ====
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Train MADDPG on multi-agent particle environments.")
+    parser.add_argument("--env_name", type=str, required=True, help="Name of the environment")
+    parser.add_argument("--n_agents", type=int, required=True, help="Number of agents")
+    parser.add_argument("--episodes", type=int, default=3000, help="Number of training episodes")
+    parser.add_argument("--save_dir", type=str, default=None, help="Directory to load/save models and results")
+    args = parser.parse_args()
+
+    ENV_NAME = args.env_name
+    N_AGENTS = args.n_agents
+    EPISODES = args.episodes
+    if args.save_dir is not None:
+        SAVE_DIR = args.save_dir
+    else:
+        SAVE_DIR = "results/maddpg-commloss_" + (ENV_NAME.split("_")[-1]) + "_" + str(N_AGENTS) + "agents_" + str(EPISODES)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env = make_env(ENV_NAME, n_agents=N_AGENTS)
     env.reset()
@@ -319,12 +348,12 @@ def main():
         pbar.set_description(f'reward:{sum(total_reward):.5f}')
         if episode % 10 == 0:
             print(f"Episode {episode}: return {np.mean(returns[-100:]):.2f}, actor loss {np.mean(ep_actor_losses[-100:]):.4f}, critic loss {np.mean(ep_critic_losses[-100:]):.4f}", flush=True)
-            draw_result(returns, ep_actor_losses, ep_critic_losses)
+            draw_result(returns, ep_actor_losses, ep_critic_losses, SAVE_DIR)
 
         if episode % 100 == 0:  # adjust frequency
             agent.save_models(save_dir=SAVE_DIR)
 
-def draw_result(returns, actor_losses, critic_losses):
+def draw_result(returns, actor_losses, critic_losses, save_dir):
     episodes = range(1, len(returns) + 1)
 
     plt.figure(figsize=(15, 4))
@@ -354,7 +383,7 @@ def draw_result(returns, actor_losses, critic_losses):
     plt.grid(True)
 
     plt.tight_layout()
-    plt.savefig(SAVE_DIR+"/training_curves.png")  # or plt.show() if you prefer
+    plt.savefig(os.path.join(save_dir, "/training_curves.png"))  # or plt.show() if you prefer
     plt.close()
 
 if __name__ == '__main__':

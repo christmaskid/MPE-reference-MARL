@@ -21,11 +21,10 @@ GAMMA = 0.9
 TAU = 0.01
 BATCH_SIZE = 1024
 BUFFER_SIZE = int(3e4)
-EPISODES = 100000
 STEPS_PER_EPISODE = 30
-N_AGENTS = 3
 WARMUP_EP = 100
 COMM_DIM = 10
+
 # ==== Actor ====
 class Actor(nn.Module):
     def __init__(self, obs_dim, hid_dim, act_dim):
@@ -298,8 +297,24 @@ class MASAC:
 
 # ==== Training Loop ====
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Train MASAC on multi-agent particle environments.")
+    parser.add_argument("--env_name", type=str, required=True, help="Name of the environment")
+    parser.add_argument("--n_agents", type=int, required=True, help="Number of agents")
+    parser.add_argument("--episodes", type=int, default=3000, help="Number of training episodes")
+    parser.add_argument("--save_dir", type=str, default=None, help="Directory to load/save models and results")
+    args = parser.parse_args()
+
+    ENV_NAME = args.env_name
+    N_AGENTS = args.n_agents
+    EPISODES = args.episodes
+    if args.save_dir is not None:
+        SAVE_DIR = args.save_dir
+    else:
+        SAVE_DIR = "results/masac-commloss_" + (ENV_NAME.split("_")[-1]) + "_" + str(N_AGENTS) + "agents_" + str(EPISODES)
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    env = make_env("multiple_reference_broadcast", n_agents=N_AGENTS)
+    env = make_env(ENV_NAME, n_agents=N_AGENTS)
     env.reset()
     obs_dims = env.observation_space[0].shape[0]
     act_dims = sum([sp.shape[0] for sp in env.action_space[0].spaces])
@@ -343,12 +358,12 @@ def main():
         pbar.set_description(f'reward:{sum(total_reward):.5f}')
         if episode % 10 == 0:
             tqdm.write(f"Episode {episode}: return {np.mean(returns[-100:]):.2f}, actor loss {np.mean(ep_actor_losses[-100:]):.4f}, critic loss {np.mean(ep_critic_losses[-100:]):.4f}")
-            draw_result(returns, ep_actor_losses, ep_critic_losses)
+            draw_result(returns, ep_actor_losses, ep_critic_losses, SAVE_DIR)
 
         if episode % 100 == 0:  # adjust frequency
-            agent.save_models(save_dir='models/')
+            agent.save_models(save_dir=SAVE_DIR)
 
-def draw_result(returns, actor_losses, critic_losses):
+def draw_result(returns, actor_losses, critic_losses, save_dir='results'):
     episodes = range(1, len(returns) + 1)
 
     plt.figure(figsize=(15, 4))
@@ -378,7 +393,7 @@ def draw_result(returns, actor_losses, critic_losses):
     plt.grid(True)
 
     plt.tight_layout()
-    plt.savefig("training_curves.png")  # or plt.show() if you prefer
+    plt.savefig(os.path.join(save_dir, "/training_curves.png"))  # or plt.show() if you prefer
     plt.close()
 
 if __name__ == '__main__':

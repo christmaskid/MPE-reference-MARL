@@ -37,9 +37,9 @@ def main():
             SAVE_DIR = "results/maddpg-commloss_" + (ENV_NAME.split("_")[-1]) + "_" + str(N_AGENTS) + "agents_" + str(EPISODES)
     
     if args.vanilla:
-        from train_maddpg import MADDPG
+        from train_maddpg_vanilla import MADDPG
     else:
-        from train_maddpg_modified import MADDPG
+        from train_maddpg import MADDPG
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env = make_env(ENV_NAME, n_agents=5, n_landmarks=3, #n_agents=N_AGENTS, n_landmarks=N_AGENTS,

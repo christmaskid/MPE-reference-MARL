@@ -6,56 +6,47 @@ A clone from the OpenAI [MPE](https://github.com/openai/multiagent-particle-envs
 
 ## Environment
 ```bash
+conda create -n mpe_marl python=3.10
+conda activate mpe_marl
 pip install -r requirements.txt
 ```
-## Training Scripts
 
-This repository provides several training scripts for multi-agent reinforcement learning algorithms:
+## Training & Testing Scripts
 
-- **train_maddpg.py**: Trains agents using the MADDPG algorithm on the MPE environments.
-- **train_maddpg_modified.py**: A variant of MADDPG with communication loss modifications.
-- **train_SAC.py**: Implements Multi-Agent Soft Actor-Critic (MASAC) training with communication loss.
-- **train_ppo.py**: Trains agents using Proximal Policy Optimization (PPO) with direct communication environment.
-- **train_ppo_broadcast.py**: PPO training with broadcast communication environment.
+This repository provides several scripts for training and evaluating multi-agent reinforcement learning algorithms on MPE environments. All scripts use `argparse` for flexible command-line configuration, supporting similar arguments for consistency.
 
-Each script supports configurable hyperparameters and saves model checkpoints and training curves. See the script headers and code comments for usage details.
+### Common Arguments
 
-Example usage:
+- `--env_name`: Name of the environment (required)
+- `--n_agents`: Number of agents (required)
+- `--episodes`: Number of training episodes (default: 3000)
+- `--save_dir`: Directory to load/save models and results (optional)
+- `--render`: Render environment and save GIFs (optional, for testing scripts)
+- `--vanilla`: Use vanilla MADDPG without communication (optional, MADDPG only)
+
+Run any script with `-h` to see all available options.
+
+### Training Scripts
+
+- **train_maddpg_vanilla.py**: Train agents using the MADDPG algorithm.
+- **train_maddpg.py**: MADDPG variant with communication loss.
+- **train_masac.py**: Multi-Agent Soft Actor-Critic (MASAC) with communication loss.
+- **train_mappo.py**: Proximal Policy Optimization (PPO).
+
+Example:
 ```bash
-python train_maddpg.py
+python train_maddpg.py --env_name multiple_reference_broadcast --n_agents 3 --episodes 3000 --save_dir results/
 ```
 
-## Testing Scripts
+### Testing Scripts
 
-This repository also provides scripts for evaluating trained models:
+- **test_maddpg.py**: Evaluate MADDPG or its communication-loss variant.
+- **test_sac.py**: Evaluate MASAC models.
+- **test_mappo.py**: Evaluate MAPPO models.
 
-- **test_maddpg.py**: Test MADDPG or its communication-loss variant.  
-    Usage example:
-    ```bash
-    python test_maddpg.py --env_name multiple_reference_broadcast --n_agents 3 --episodes 3000 --render
-    ```
-    Key arguments:
-    - `--env_name`: Name of the environment (required)
-    - `--n_agents`: Number of agents (required)
-    - `--episodes`: Number of episodes (default: 3000)
-    - `--save_dir`: Directory for loading models/results (optional)
-    - `--render`: Render environment and save GIFs (optional)
-    - `--vanilla`: Use vanilla MADDPG without communication (optional)
+Example:
+```bash
+python test_maddpg.py --env_name multiple_reference_broadcast --n_agents 3 --episodes 3000 --render
+```
 
-- **test_sac.py**: Test MASAC (Multi-Agent SAC) models.  
-    Usage example:
-    ```bash
-    python test_sac.py --env_name multiple_reference_broadcast --n_agents 3 --episodes 3000 --render
-    ```
-    Key arguments:
-    - `--env_name`, `--n_agents`, `--episodes`, `--save_dir`, `--render` (same as above)
-
-- **test_mappo.py**: Test MAPPO models.  
-    Usage example:
-    ```bash
-    python test_mappo.py --env_name multiple_reference_broadcast --n_agents 3 --episodes 3000 --render
-    ```
-    Key arguments:
-    - `--env_name`, `--n_agents`, `--episodes`, `--save_dir`, `--render` (same as above)
-
-All testing scripts use `argparse` for flexible command-line configuration. See each script's help (`-h`) for details.
+Each script saves model checkpoints and training curves as appropriate. See script headers and code comments for further usage details.

@@ -18,14 +18,12 @@ from make_env import make_env
 
 os.environ['SUPPRESS_MA_PROMPT']='1'
 
-N_AGENTS = 2
-
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 Transition = namedtuple('Transition', ['obs', 'action', 'reward', 'next_obs', 'done', 'log_prob', 'value'])
 
 class PPONet(nn.Module):
-    def __init__(self, obs_dim, act_dim):
+    def __init__(self, obs_dim, act_dim, n_agents):
         super().__init__()
         self.actor = nn.Sequential(
             nn.Linear(obs_dim, 512),
@@ -37,7 +35,7 @@ class PPONet(nn.Module):
             nn.Linear(512, act_dim)
         )
         self.critic = nn.Sequential(
-            nn.Linear(obs_dim*N_AGENTS, 512),
+            nn.Linear(obs_dim*n_agents, 512),
             nn.Tanh(),
             nn.Linear(512, 512), 
             nn.Tanh(),
@@ -110,8 +108,8 @@ class PPONet(nn.Module):
         return value, log_prob, entropy
 
 class PPOAgent:
-    def __init__(self, env, device):
-        self.n_agents = N_AGENTS
+    def __init__(self, env, n_agents, device):
+        self.n_agents = n_agents
         self.device = device
 
         self.obs_dims = env.observation_space[0].shape[0]
@@ -124,11 +122,11 @@ class PPOAgent:
         # self.model = [PPONet(self.obs_dims, self.act_dims).to(self.device) for i in range(self.n_agents)]
         self.model = PPONet(self.obs_dims, self.act_dims).to(self.device)
         
-        self.ppo_epoches = 10
+        self.ppo_epoches = 15
         self.buffer = []
         self.batch_size = 64
 
-        self.gamma = 0.99
+        self.gamma = 0.9
         self.lam = 0.95
         ep = 0.2
         self.min_ratio = 1-ep
@@ -140,8 +138,8 @@ class PPOAgent:
         actor_params = list(self.model.actor.parameters()) + [self.model.log_std]
         critic_params = self.model.critic.parameters()
 
-        self.actor_optimizer = optim.Adam(actor_params, lr=3e-4)
-        self.critic_optimizer = optim.Adam(critic_params, lr=1e-3)
+        self.actor_optimizer = optim.Adam(actor_params, lr=1e-5)
+        self.critic_optimizer = optim.Adam(critic_params, lr=1e-5)
 
         self.c1 = 0.5
         self.c2 = 0.01
@@ -245,7 +243,7 @@ class PPOAgent:
         return mean_total_losses, mean_actor_losses, mean_critic_losses, mean_entropy_losses
 
 
-def train(env, epoches):
+def train(env, n_agents, epoches, save_dir):
     env.reset()
     agent = PPOAgent(env, device)
 
@@ -278,38 +276,41 @@ def train(env, epoches):
         agent.buffer = [] # empty the buffer
 
         episode_rewards = []
-        total_reward = np.zeros(N_AGENTS)
-        prev_rewards_n = [torch.tensor(0)] * N_AGENTS
+        total_reward = np.zeros(n_agents)
+        prev_rewards_n = [torch.tensor(0)] * n_agents
 
         step = 0
         for _ in range(max_steps):
             with torch.no_grad():
                 # self_pose(2), self_velocity(2), other's landmark_pose(2), comm(10)
-                obs_n = [torch.tensor(obs_n[i], dtype=torch.float32).to(device) for i in range(N_AGENTS)]
+                if not isinstance(obs_n, list):
+                    obs_n = [obs_n] * n_agents
+                if isinstance(obs_n[0], np.ndarray):
+                    obs_n = [torch.tensor(obs_n[i], dtype=torch.float32).to(device) for i in range(n_agents)]
          
-                outputs = [agent.model.get_act(obs_n[i]) for i in range(N_AGENTS)]
+                outputs = [agent.model.get_act(obs_n[i]) for i in range(n_agents)]
                 move, comm, actions_n, log_prob_n = zip(*outputs)
 
                 obs_input = torch.stack(obs_n, dim=0).unsqueeze(0)
-                value_n = [torch.tensor(agent.model.evaluate(obs_input, actions_n[i], i)[0].item()).to(device) for i in range(N_AGENTS)]
+                value_n = [torch.tensor(agent.model.evaluate(obs_input, actions_n[i], i)[0].item()).to(device) for i in range(n_agents)]
 
-                action_input = [[move[i].cpu().numpy(), comm[i].cpu().numpy()] for i in range(N_AGENTS)]
+                action_input = [[move[i].cpu().numpy(), comm[i].cpu().numpy()] for i in range(n_agents)]
 
             next_obs_n, rewards_n, dones_n, _  = env.step(action_input)
             # rewards_n = [r / 10 for r in rewards_n]
 
             if step == max_step_per_game -1:
-                dones_n = [True for i in range(N_AGENTS)]
+                dones_n = [True for i in range(n_agents)]
 
-            next_obs_n = [torch.tensor(next_obs_n[i], dtype=torch.float32).to(device) for i in range(N_AGENTS)]
-            rewards_n = [torch.tensor(rewards_n[i], dtype=torch.float32).to(device) for i in range(N_AGENTS)]
-            dones_n = [torch.tensor(dones_n[i], dtype=torch.float32).to(device) for i in range(N_AGENTS)]
+            next_obs_n = [torch.tensor(next_obs_n[i], dtype=torch.float32).to(device) for i in range(n_agents)]
+            rewards_n = [torch.tensor(rewards_n[i], dtype=torch.float32).to(device) for i in range(n_agents)]
+            dones_n = [torch.tensor(dones_n[i], dtype=torch.float32).to(device) for i in range(n_agents)]
 
-            incremental_rewards = [rewards_n[i]-prev_rewards_n[i] for i in range(N_AGENTS)]
+            incremental_rewards = [rewards_n[i]-prev_rewards_n[i] for i in range(n_agents)]
             prev_rewards_n = rewards_n
 
             agent.collect(obs_n, actions_n, incremental_rewards, next_obs_n, dones_n, log_prob_n, value_n)
-            for i in range(N_AGENTS):
+            for i in range(n_agents):
                 total_reward[i] += rewards_n[i].cpu().numpy()
             
             obs_n = next_obs_n
@@ -319,19 +320,21 @@ def train(env, epoches):
                 obs_n = env.reset()
                 
                 episode_rewards.append(total_reward)
-                total_reward = np.zeros(N_AGENTS)
+                total_reward = np.zeros(n_agents)
                 step = 0
-                prev_rewards_n =  [torch.tensor(0)] * N_AGENTS
+                prev_rewards_n =  [torch.tensor(0)] * n_agents
 
         if not all(dones_n):
             episode_rewards.append(total_reward)
 
         mean_total_losses, mean_actor_losses, mean_critic_losses, mean_entropy_losses = agent.update()
         
-        if epoch % check_peroid == 0:
+        if epoch % 1 == 0:
             avg_rew = np.mean(episode_rewards, axis = 0)
-            # tqdm.write(f"Epoch {epoch}, Average Reward: {avg_rew[0]:.2f}, {avg_rew[1]:.2f}, Loss: {total_loss:.4f}, Actor Loss: {actor_loss:.4f}, Critic Loss: {critic_loss:.4f}, Entropy Loss: {entropy_loss:.4f}")
+            # tqdm.write(f"Epoch {epoch}, Average Reward: {avg_rew[0]:.2f}, {avg_rew[1]:.2f}", flush=True)#, Loss: {total_loss:.4f}, Actor Loss: {actor_loss:.4f}, Critic Loss: {critic_loss:.4f}, Entropy Loss: {entropy_loss:.4f}")
             
+            
+        if epoch % check_peroid == 0:
             tqdm.write(f"Epoch {epoch}:")
             for i in range(len(mean_total_losses)):
                 tqdm.write(
@@ -339,18 +342,16 @@ def train(env, epoches):
                     f"Average Reward: {avg_rew[0]:.2f}, {avg_rew[1]:.2f}, "
                     f"Actor: {mean_actor_losses[i]:.4f}, "
                     f"Critic: {mean_critic_losses[i]:.4f}, "
-                    f"Entropy: {mean_entropy_losses[i]:.4f}"
+                    f"Entropy: {mean_entropy_losses[i]:.4f}",
                 )
-            
             # save model
-            eval_returns = eval(env, agent, max_step_per_game)
+            eval_returns = eval(env, n_agents, agent, max_step_per_game)
             tqdm.write(f"{eval_returns}")
-            # if eval_returns[0] > max_returns[0] and eval_returns[1] > max_returns[1]:
-            if sum(eval_returns) > sum(max_returns):
+            if eval_returns[0] > max_returns[0] and eval_returns[1] > max_returns[1]:
                 tqdm.write(f"Save model with evaluation returns: {eval_returns}")
                 max_returns = eval_returns
                 # for i in range(agent.n_agents):
-                torch.save(agent.model.state_dict(), f"PPO_agent_broadcast.pth")
+                torch.save(os.path.join(save_dir, agent.model.state_dict()), f"PPO_agent_{n_agents}_agent.pth")
 
             # average reward for two agents
             returns.append(avg_rew)
@@ -374,31 +375,34 @@ def train(env, epoches):
 
             plot(returns, actor_losses, critic_losses, entropy_losses, check_peroid)
 
-def eval(env, agent, max_step_per_game):
+def eval(env, n_agents, agent, max_step_per_game):
     returns = []
 
     for epoch in range(10):
         obs_n= env.reset()
-        total_reward = np.zeros(N_AGENTS)
-        dones_n = [torch.tensor(False, dtype=torch.float32).to(device) for i in range(N_AGENTS)]
+        total_reward = np.zeros(n_agents)
+        dones_n = [torch.tensor(False, dtype=torch.float32).to(device) for i in range(n_agents)]
 
         for _ in range(max_step_per_game):
             with torch.no_grad():
-                obs_n = [torch.tensor(obs_n[i], dtype=torch.float32).to(device) for i in range(N_AGENTS)]
+                if not isinstance(obs_n, list):
+                    obs_n = [obs_n] * n_agents
+                if isinstance(obs_n[0], np.ndarray):
+                    obs_n = [torch.tensor(obs_n[i], dtype=torch.float32).to(device) for i in range(n_agents)]
          
-                outputs = [agent.model.get_act(obs_n[i]) for i in range(N_AGENTS)]
+                outputs = [agent.model.get_act(obs_n[i]) for i in range(n_agents)]
                 move, comm, _, _ = zip(*outputs)
 
-                action_input = [[move[i].cpu().numpy(), comm[i].cpu().numpy()] for i in range(N_AGENTS)]
+                action_input = [[move[i].cpu().numpy(), comm[i].cpu().numpy()] for i in range(n_agents)]
 
             next_obs_n, rewards_n, dones_n, _  = env.step(action_input)
             # rewards_n = np.clip(rewards_n, -10, 0)
 
-            next_obs_n = [torch.tensor(next_obs_n[i], dtype=torch.float32).to(device) for i in range(N_AGENTS)]
-            rewards_n = [torch.tensor(rewards_n[i], dtype=torch.float32).to(device) for i in range(N_AGENTS)]
-            dones_n = [torch.tensor(dones_n[i], dtype=torch.float32).to(device) for i in range(N_AGENTS)]
+            next_obs_n = [torch.tensor(next_obs_n[i], dtype=torch.float32).to(device) for i in range(n_agents)]
+            rewards_n = [torch.tensor(rewards_n[i], dtype=torch.float32).to(device) for i in range(n_agents)]
+            dones_n = [torch.tensor(dones_n[i], dtype=torch.float32).to(device) for i in range(n_agents)]
 
-            for i in range(N_AGENTS):
+            for i in range(n_agents):
                 total_reward[i] += rewards_n[i].cpu().numpy()
 
             if all(dones_n):
@@ -419,7 +423,7 @@ def plot(returns, actor_losses, critic_losses, entropy_losses, check_peroid):
 
     # Subplot 1: Average Reward
     for agent_idx in range(num_agents):
-        x_vals = [i * check_peroid for i in range(len(returns))]
+        x_vals = [i * 20 for i in range(len(returns))]
         y_vals = [r[agent_idx] for r in returns]
         axes[0, 0].plot(x_vals, y_vals, label=f'Agent {agent_idx}')
     axes[0, 0].set_xlabel("Epochs")
@@ -465,9 +469,25 @@ def plot(returns, actor_losses, critic_losses, entropy_losses, check_peroid):
 
 def main():
     # env = simple_reference_v3.parallel_env(continuous_actions=True)
-    env = make_env("multiple_reference_broadcast", n_agents=N_AGENTS)
-    epoches = 3000
-    train(env, epoches)
+    import argparse
+    parser = argparse.ArgumentParser(description="Train MAPPO on multi-agent particle environments.")
+    parser.add_argument("--env_name", type=str, required=True, help="Name of the environment")
+    parser.add_argument("--n_agents", type=int, required=True, help="Number of agents")
+    parser.add_argument("--episodes", type=int, default=3000, help="Number of training episodes")
+    parser.add_argument("--save_dir", type=str, default=None, help="Directory to load/save models and results")
+    args = parser.parse_args()
+
+    ENV_NAME = args.env_name
+    N_AGENTS = args.n_agents
+    EPISODES = args.episodes
+    if args.save_dir is not None:
+        SAVE_DIR = args.save_dir
+    else:
+        SAVE_DIR = "results/mappo_" + (ENV_NAME.split("_")[-1]) + "_" + str(N_AGENTS) + "agents_" + str(EPISODES)
+
+    env = make_env(ENV_NAME, n_agents=N_AGENTS)
+    epoches = EPISODES
+    train(env, N_AGENTS, epoches, SAVE_DIR)
 
 if __name__ == "__main__":
     main()
