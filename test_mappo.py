@@ -25,14 +25,14 @@ class PPOAgent:
         self.obs_dims = env.observation_space[0].shape[0]
         self.act_dims = sum([sp.shape[0] for sp in env.action_space[0].spaces])
 
-        # print(f"Observation space dimension: {self.obs_dims}")
-        # print(f"Action space dimension: {self.act_dims}")
+        print(f"Observation space dimension: {self.obs_dims}")
+        print(f"Action space dimension: {self.act_dims}")
         
-        self.model = [PPONet(self.obs_dims, self.act_dims).to(self.device) for i in range(self.n_agents)]
+        self.model = [PPONet(self.obs_dims, self.act_dims, self.n_agents).to(self.device) for i in range(self.n_agents)]
 
     def load_models(self, save_dir):
         for i in range(self.n_agents):
-            self.model[i].load_state_dict(torch.load(os.path.join(save_dir, f"PPO_agent_{self.n_agents}.pth")))
+            self.model[i].load_state_dict(torch.load(os.path.join(save_dir, f"PPO_agent_{self.n_agents}.pth"), map_location=self.device))
             self.model[i].eval()
 
 
@@ -53,12 +53,11 @@ def main():
     else:
         SAVE_DIR = "results/mappo_" + (ENV_NAME.split("_")[-1]) + "_" + str(N_AGENTS) + "agents_" + str(EPISODES)
         
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # env = make_env("multiple_reference", n_agents=N_AGENTS)
     env = make_env(ENV_NAME, n_agents=N_AGENTS)
     env.reset()
     np.random.seed(0)
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     agent = PPOAgent(env, N_AGENTS, device)
     agent.load_models(SAVE_DIR)
     agents_total_reward = 0
@@ -82,7 +81,8 @@ def main():
 
             next_obs, rewards, dones, info = env.step(action_input)
             
-            if i == 0 and args.render:
+            if i == 0:
+                # if args.render:
                 frames.append(Image.fromarray(np.array(env.render(mode='rgb_array')[0])))
                 time.sleep(0.1)
 
@@ -110,7 +110,7 @@ def main():
     if args.render:
         if not os.path.exists(SAVE_DIR):
             os.makedirs(SAVE_DIR)
-        frames[0].save(os.path.join(SAVE_DIR, f"test_{N_AGENTS}_agent_broadcast.gif", save_all=True, append_images=frames[1:], optimize=True, loop=0))
+        frames[0].save(os.path.join(SAVE_DIR, f"test_{N_AGENTS}_agent_broadcast.gif"), save_all=True, append_images=frames[1:], optimize=True, loop=0)
 
     
 if __name__=="__main__":

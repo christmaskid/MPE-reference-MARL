@@ -8,8 +8,6 @@ sys.path.insert(0,'multiagent-particle-envs')
 from make_env import make_env
 import imageio
 
-
-from train_masac import MASAC
 import argparse
 DIM_C = 10
 SHARED_REWARD = 0
@@ -26,6 +24,7 @@ def main():
     parser.add_argument("--episodes", type=int, default=3000, help="Number of training episodes")
     parser.add_argument("--save_dir", type=str, default=None, help="Directory to load/save models and results")
     parser.add_argument("--render", action="store_true", help="Render environment and save gifs")
+    parser.add_argument("--vanilla", action="store_true", help="Use vanilla MASAC without communication loss")
     args = parser.parse_args()
 
     ENV_NAME = args.env_name
@@ -34,8 +33,16 @@ def main():
     if args.save_dir is not None:
         SAVE_DIR = args.save_dir
     else:
-        SAVE_DIR = "results/masac-commloss_" + (ENV_NAME.split("_")[-1]) + "_" + str(N_AGENTS) + "agents_" + str(EPISODES)
+        if args.vanilla:
+            SAVE_DIR = "results/masac_vanilla_" + (ENV_NAME.split("_")[-1]) + "_" + str(N_AGENTS) + "agents_" + str(EPISODES)
+        else:
+            SAVE_DIR = "results/masac-commloss_" + (ENV_NAME.split("_")[-1]) + "_" + str(N_AGENTS) + "agents_" + str(EPISODES)
     
+    if args.vanilla:
+        from train_masac_vanilla import MASAC
+    else:
+        from train_masac import MASAC
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env = make_env(ENV_NAME, n_agents=N_AGENTS, n_landmarks=N_AGENTS,
                    shared_reward=SHARED_REWARD, dim_c=DIM_C, reward_alpha=REWARD_ALPHA, training=False)

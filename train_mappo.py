@@ -120,7 +120,7 @@ class PPOAgent:
         # action all in range (-1, 1)
         
         # self.model = [PPONet(self.obs_dims, self.act_dims).to(self.device) for i in range(self.n_agents)]
-        self.model = PPONet(self.obs_dims, self.act_dims).to(self.device)
+        self.model = PPONet(self.obs_dims, self.act_dims, self.n_agents).to(self.device)
         
         self.ppo_epoches = 15
         self.buffer = []

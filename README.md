@@ -22,7 +22,7 @@ This repository provides several scripts for training and evaluating multi-agent
 - `--episodes`: Number of training episodes (default: 3000)
 - `--save_dir`: Directory to load/save models and results (optional)
 - `--render`: Render environment and save GIFs (optional, for testing scripts)
-- `--vanilla`: Use vanilla MADDPG without communication (optional, MADDPG only)
+- `--vanilla`: Use vanilla MADDPG without communication (optional, MADDPG and MASAC only)
 
 Run any script with `-h` to see all available options.
 
