@@ -104,8 +104,9 @@ def main():
             save_img_path = os.path.join(SAVE_DIR, 'out{}.png'.format(ep))
             imageio.imwrite(save_img_path, frames[-1])
             print("Saved episode as {}".format(save_path))
-            print(f"Average Total reward for each agent: {total_reward.mean()}", f"{total_reward}", flush=True)
-            avg_total_reward += total_reward.mean()
+        
+        print(f"Average Total reward for each agent: {total_reward.mean()}", f"{total_reward}", flush=True)
+        avg_total_reward += total_reward.mean()
     
     print("Average total reward over 10 episodes for each agent:", avg_total_reward / 10, flush=True)
     env.close()

@@ -110,8 +110,8 @@ def main():
             imageio.mimsave(save_path, frames, duration=0.01, save_all=True, append_images=frames[1:], optimize=True, loop=0)
             save_img_path = os.path.join(SAVE_DIR, 'out{}.png'.format(ep))
             imageio.imwrite(save_img_path, frames[-1])
-        
-        print("Saved episode as {}".format(save_path))
+            print("Saved episode as {}".format(save_path))
+            
         print(f"Average Total reward for each agent: {total_reward.mean()}", f"{total_reward}", flush=True)
         avg_total_reward += total_reward.mean()
     
