@@ -10,21 +10,32 @@ import imageio
 
 
 from train_SAC import MASAC
+import argparse
 DIM_C = 10
 SHARED_REWARD = 0
 act_u_dim = 2
 REWARD_ALPHA = 0 # the weight of learning communication vs. movement
 
-# SAVE_DIR = "maddpg_new"
-ENV_NAME = "multiple_reference_direct" # broadcast" #
-N_AGENTS = 2
-EPISODES = 3000
-SAVE_DIR = "masac_"+(ENV_NAME.split("_")[-1])+"_"+str(N_AGENTS)+"agents_"+str(EPISODES)
-# SAVE_DIR = f"maddpg_{ENV_NAME}_{N_AGENTS}_{DIM_C}_{SHARED_REWARD}_{REWARD_ALPHA}_{act_u_dim}_mut_broadcast" #'models/'
 
 STEPS_PER_EPISODE = 25
 
 def main():
+    parser = argparse.ArgumentParser(description="Test MASAC on multi-agent particle environments.")
+    parser.add_argument("--env_name", type=str, required=True, help="Name of the environment")
+    parser.add_argument("--n_agents", type=int, required=True, help="Number of agents")
+    parser.add_argument("--episodes", type=int, default=3000, help="Number of training episodes")
+    parser.add_argument("--save_dir", type=str, default=None, help="Directory to load/save models and results")
+    parser.add_argument("--render", action="store_true", help="Render environment and save gifs")
+    args = parser.parse_args()
+
+    ENV_NAME = args.env_name
+    N_AGENTS = args.n_agents
+    EPISODES = args.episodes
+    if args.save_dir is not None:
+        SAVE_DIR = args.save_dir
+    else:
+        SAVE_DIR = "results/masac_" + (ENV_NAME.split("_")[-1]) + "_" + str(N_AGENTS) + "agents_" + str(EPISODES)
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env = make_env(ENV_NAME, n_agents=N_AGENTS, n_landmarks=N_AGENTS,
                    shared_reward=SHARED_REWARD, dim_c=DIM_C, reward_alpha=REWARD_ALPHA, training=False)
@@ -77,8 +88,9 @@ def main():
             dones = np.array(dones)
             obs = next_obs
 
-            frame = np.array(env.render(mode='rgb_array'))
-            frames.append(frame[0])
+            if args.render:
+                frame = np.array(env.render(mode='rgb_array'))
+                frames.append(frame[0])
 
             if dones.all():
                 break
@@ -86,13 +98,14 @@ def main():
         print("Total reward for episode {}: {}".format(ep, total_reward), flush=True)
         
         # Save frames as gif
-        save_path = os.path.join(SAVE_DIR, 'out{}.gif'.format(ep))
-        imageio.mimsave(save_path, frames, duration=0.01)
-        save_img_path = os.path.join(SAVE_DIR, 'out{}.png'.format(ep))
-        imageio.imwrite(save_img_path, frames[-1])
-        print("Saved episode as {}".format(save_path))
-        print(f"Average Total reward for each agent: {total_reward.mean()}", f"{total_reward}", flush=True)
-        avg_total_reward += total_reward.mean()
+        if args.render:
+            save_path = os.path.join(SAVE_DIR, 'out{}.gif'.format(ep))
+            imageio.mimsave(save_path, frames, duration=0.01)
+            save_img_path = os.path.join(SAVE_DIR, 'out{}.png'.format(ep))
+            imageio.imwrite(save_img_path, frames[-1])
+            print("Saved episode as {}".format(save_path))
+            print(f"Average Total reward for each agent: {total_reward.mean()}", f"{total_reward}", flush=True)
+            avg_total_reward += total_reward.mean()
     
     print("Average total reward over 10 episodes for each agent:", avg_total_reward / 10, flush=True)
     env.close()
